@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/build/
+.vercel
+
+# Python
+backend/.venv/
+**/__pycache__/
+*.py[cod]
+backend/*.db
+backend/*.sqlite3
+
+# Env
+.env
+.env.local
+.env*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+
+# Build artifacts
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# Assignment brief (not part of the app)
+*.docx
