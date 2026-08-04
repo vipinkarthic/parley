@@ -1,0 +1,14 @@
+# Render.com blueprint for the FastAPI backend.
+# Deploy: New + > Blueprint, point at this repo, set root to `backend`.
+services:
+  - type: web
+    name: zoom-clone-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FRONTEND_URL
+        sync: false # set to your deployed frontend URL
+      - key: CORS_ORIGINS
+        sync: false # e.g. https://your-app.vercel.app
