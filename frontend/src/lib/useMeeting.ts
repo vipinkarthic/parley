@@ -144,6 +144,11 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   useEffect(() => {
     localStreamRef.current = localStream;
+    // keep the real tracks matching the mic/cam state, else the UI says muted while audio is still live
+    if (localStream) {
+      localStream.getAudioTracks().forEach((t) => (t.enabled = !stateRef.current.muted));
+      localStream.getVideoTracks().forEach((t) => (t.enabled = stateRef.current.videoOn));
+    }
   }, [localStream]);
   useEffect(() => {
     myNameRef.current = myName;
