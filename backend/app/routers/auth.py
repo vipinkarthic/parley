@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .. import config, crud, schemas
+from .. import config, crud, models, schemas
 from ..database import get_db
 from ..deps import get_current_user
 from ..emailer import send_otp_email
@@ -134,6 +134,21 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=schemas.UserOut)
 def me(current=Depends(get_current_user)):
     return current
+
+
+@router.post("/change-password")
+def change_password(
+    data: schemas.ChangePassword,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your current password is incorrect.",
+        )
+    crud.change_password(db, user, hash_password(data.new_password))
+    return {"ok": True}
 
 
 @router.get("/demo-accounts")

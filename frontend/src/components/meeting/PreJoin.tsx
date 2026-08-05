@@ -19,6 +19,7 @@ export function PreJoin({
   error,
   initialMicOn = true,
   initialCamOn = true,
+  hd = false,
   onJoin,
 }: {
   meeting: Meeting;
@@ -28,6 +29,7 @@ export function PreJoin({
   error: string | null;
   initialMicOn?: boolean;
   initialCamOn?: boolean;
+  hd?: boolean;
   onJoin: (opts: {
     name: string;
     passcode: string;
@@ -50,7 +52,10 @@ export function PreJoin({
   useEffect(() => {
     let cancelled = false;
     navigator.mediaDevices
-      ?.getUserMedia({ video: true, audio: true })
+      ?.getUserMedia({
+        video: hd ? { width: { ideal: 1280 }, height: { ideal: 720 } } : true,
+        audio: true,
+      })
       .then((s) => {
         if (cancelled) {
           s.getTracks().forEach((t) => t.stop());

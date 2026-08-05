@@ -17,6 +17,15 @@ def contacts(
     return crud.list_contacts(db, exclude_user_id=user.id)
 
 
+@router.patch("/profile", response_model=schemas.UserOut)
+def update_profile(
+    data: schemas.ProfileUpdate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return crud.update_profile(db, user, data)
+
+
 @router.get("/preferences", response_model=schemas.PreferencesOut)
 def get_preferences(user: models.User = Depends(get_current_user)):
     return user

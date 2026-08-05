@@ -217,6 +217,7 @@ export default function MeetingRoomPage() {
         error={joinError}
         initialMicOn={prefs ? !prefs.pref_join_muted : true}
         initialCamOn={prefs ? prefs.pref_video_on_join : true}
+        hd={prefs ? prefs.pref_hd_video : false}
         onJoin={handleJoin}
       />
     );

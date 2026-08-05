@@ -43,6 +43,7 @@ def seed_demo_accounts(db: Session) -> models.User:
                 password_hash=hash_password(DEMO_PASSWORD),
                 is_verified=True,
                 avatar_color=acc["color"],
+                pmi=utils.generate_meeting_number(db),
             )
             db.add(user)
             db.commit()

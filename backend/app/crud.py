@@ -36,11 +36,62 @@ def create_user(
         password_hash=password_hash,
         is_verified=True,
         avatar_color=color,
+        pmi=utils.generate_meeting_number(db),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
+
+def update_profile(
+    db: Session, user: models.User, data: schemas.ProfileUpdate
+) -> models.User:
+    if data.name is not None:
+        user.name = data.name.strip()
+    if data.avatar_color is not None:
+        user.avatar_color = data.avatar_color
+    if data.avatar_url is not None:
+        user.avatar_url = data.avatar_url or None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def change_password(db: Session, user: models.User, new_hash: str) -> None:
+    user.password_hash = new_hash
+    db.commit()
+
+
+def get_or_create_personal_meeting(
+    db: Session, user: models.User
+) -> models.Meeting:
+    """The user's permanent personal room (meeting_number == their PMI)."""
+    meeting = (
+        db.query(models.Meeting)
+        .filter(models.Meeting.meeting_number == user.pmi)
+        .first()
+    )
+    if meeting is None:
+        meeting = models.Meeting(
+            id=uuid.uuid4().hex,
+            meeting_number=user.pmi,
+            passcode=utils.generate_passcode(),
+            topic=f"{user.name}'s Personal Room",
+            host_id=user.id,
+            meeting_type="instant",
+            status="active",
+            start_time=datetime.now(),
+            duration=60,
+        )
+        db.add(meeting)
+        db.commit()
+        db.refresh(meeting)
+    elif meeting.status == "ended":
+        meeting.status = "active"
+        db.commit()
+        db.refresh(meeting)
+    return meeting
 
 
 def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
@@ -70,6 +121,7 @@ def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
             "name": u.name,
             "email": u.email,
             "avatar_color": u.avatar_color,
+            "avatar_url": u.avatar_url,
             "status": "in-meeting" if u.id in busy else "available",
         }
         for u in users

@@ -90,6 +90,7 @@ export function Navbar() {
               <Avatar
                 name={user?.name || "You"}
                 color={user?.avatar_color}
+                src={user?.avatar_url}
                 size={32}
               />
               <span className="hidden text-sm font-medium text-zoom-ink sm:block">

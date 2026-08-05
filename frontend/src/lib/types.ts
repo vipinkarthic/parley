@@ -3,6 +3,8 @@ export interface User {
   name: string;
   email: string;
   avatar_color: string;
+  avatar_url: string | null;
+  pmi: string;
 }
 
 export interface MeetingSettings {
@@ -61,6 +63,7 @@ export interface Contact {
   name: string;
   email: string;
   avatar_color: string;
+  avatar_url: string | null;
   status: "available" | "in-meeting";
 }
 

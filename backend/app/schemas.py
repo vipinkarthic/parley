@@ -11,6 +11,8 @@ class UserOut(BaseModel):
     name: str
     email: str
     avatar_color: str
+    avatar_url: str | None = None
+    pmi: str = ""
 
 
 class ContactOut(BaseModel):
@@ -20,7 +22,19 @@ class ContactOut(BaseModel):
     name: str
     email: str
     avatar_color: str
+    avatar_url: str | None = None
     status: str
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    avatar_color: str | None = Field(default=None, max_length=9)
+    avatar_url: str | None = Field(default=None, max_length=900_000)
+
+
+class ChangePassword(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)
 
 
 class PreferencesOut(BaseModel):

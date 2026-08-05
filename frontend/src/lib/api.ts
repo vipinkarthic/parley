@@ -100,6 +100,22 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: () => request<User>("/auth/me"),
+  updateProfile: (patch: {
+    name?: string;
+    avatar_color?: string;
+    avatar_url?: string | null;
+  }) =>
+    request<User>("/api/profile", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<{ ok: boolean }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+  startPersonalRoom: () =>
+    request<Meeting>("/api/meetings/personal", { method: "POST" }),
   demoAccounts: () =>
     request<{ name: string; email: string; password: string }[]>(
       "/auth/demo-accounts"

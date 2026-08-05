@@ -92,6 +92,7 @@ export default function ContactsPage() {
                 name={`${user.name} (You)`}
                 email={user.email}
                 color={user.avatar_color}
+                src={user.avatar_url}
                 status="available"
                 self
               />
@@ -120,6 +121,7 @@ export default function ContactsPage() {
                   name={c.name}
                   email={c.email}
                   color={c.avatar_color}
+                  src={c.avatar_url}
                   status={c.status}
                   onMeet={() => meet(c)}
                   meetDisabled={starting}
@@ -137,6 +139,7 @@ function ContactRow({
   name,
   email,
   color,
+  src,
   status,
   onMeet,
   meetDisabled,
@@ -145,6 +148,7 @@ function ContactRow({
   name: string;
   email: string;
   color?: string;
+  src?: string | null;
   status: string;
   onMeet?: () => void;
   meetDisabled?: boolean;
@@ -154,7 +158,7 @@ function ContactRow({
   return (
     <div className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-zoom-field">
       <div className="relative">
-        <Avatar name={name.replace(" (You)", "")} color={color} size={40} />
+        <Avatar name={name.replace(" (You)", "")} color={color} src={src} size={40} />
         <span
           className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white"
           style={{ background: s.color }}

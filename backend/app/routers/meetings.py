@@ -50,6 +50,16 @@ def create_instant(
     return meeting_out(db, meeting, user.id)
 
 
+@router.post("/meetings/personal", response_model=schemas.MeetingOut)
+def personal_room(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """The caller's permanent personal room (PMI)."""
+    meeting = crud.get_or_create_personal_meeting(db, user)
+    return meeting_out(db, meeting, user.id)
+
+
 @router.post(
     "/meetings/schedule",
     response_model=schemas.MeetingOut,
