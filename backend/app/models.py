@@ -43,6 +43,12 @@ class User(Base):
     avatar_color: Mapped[str] = mapped_column(String(9), default="#0B5CFF")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
+    pref_video_on_join: Mapped[bool] = mapped_column(Boolean, default=True)
+    pref_join_muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    pref_mirror_video: Mapped[bool] = mapped_column(Boolean, default=True)
+    pref_hd_video: Mapped[bool] = mapped_column(Boolean, default=False)
+    pref_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+
     meetings: Mapped[list["Meeting"]] = relationship(back_populates="host")
 
 

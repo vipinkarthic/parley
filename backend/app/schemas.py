@@ -13,6 +13,34 @@ class UserOut(BaseModel):
     avatar_color: str
 
 
+class ContactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str
+    avatar_color: str
+    status: str
+
+
+class PreferencesOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    pref_video_on_join: bool
+    pref_join_muted: bool
+    pref_mirror_video: bool
+    pref_hd_video: bool
+    pref_notifications: bool
+
+
+class PreferencesUpdate(BaseModel):
+    pref_video_on_join: bool | None = None
+    pref_join_muted: bool | None = None
+    pref_mirror_video: bool | None = None
+    pref_hd_video: bool | None = None
+    pref_notifications: bool | None = None
+
+
 class SignupRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     email: EmailStr

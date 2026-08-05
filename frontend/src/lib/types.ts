@@ -35,3 +35,19 @@ export interface JoinResult extends Participant {
   ws_token: string;
   is_meeting_host: boolean;
 }
+
+export interface Contact {
+  id: number;
+  name: string;
+  email: string;
+  avatar_color: string;
+  status: "available" | "in-meeting";
+}
+
+export interface Preferences {
+  pref_video_on_join: boolean;
+  pref_join_muted: boolean;
+  pref_mirror_video: boolean;
+  pref_hd_video: boolean;
+  pref_notifications: boolean;
+}

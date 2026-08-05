@@ -17,6 +17,8 @@ export function PreJoin({
   requirePasscode,
   joining,
   error,
+  initialMicOn = true,
+  initialCamOn = true,
   onJoin,
 }: {
   meeting: Meeting;
@@ -24,6 +26,8 @@ export function PreJoin({
   requirePasscode: boolean;
   joining: boolean;
   error: string | null;
+  initialMicOn?: boolean;
+  initialCamOn?: boolean;
   onJoin: (opts: {
     name: string;
     passcode: string;
@@ -35,8 +39,8 @@ export function PreJoin({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
+  const [micOn, setMicOn] = useState(initialMicOn);
+  const [camOn, setCamOn] = useState(initialCamOn);
   const [denied, setDenied] = useState(false);
   const [name, setName] = useState(defaultName);
   const [passcode, setPasscode] = useState("");
@@ -52,6 +56,8 @@ export function PreJoin({
           s.getTracks().forEach((t) => t.stop());
           return;
         }
+        s.getAudioTracks().forEach((t) => (t.enabled = initialMicOn));
+        s.getVideoTracks().forEach((t) => (t.enabled = initialCamOn));
         streamRef.current = s;
         setStream(s);
       })

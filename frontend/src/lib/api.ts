@@ -1,4 +1,11 @@
-import type { JoinResult, Meeting, Participant, User } from "./types";
+import type {
+  Contact,
+  JoinResult,
+  Meeting,
+  Participant,
+  Preferences,
+  User,
+} from "./types";
 
 const BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||
@@ -96,6 +103,14 @@ export const api = {
     request<{ name: string; email: string; password: string }[]>(
       "/auth/demo-accounts"
     ),
+
+  contacts: () => request<Contact[]>("/api/contacts"),
+  preferences: () => request<Preferences>("/api/preferences"),
+  updatePreferences: (patch: Partial<Preferences>) =>
+    request<Preferences>("/api/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 
   upcoming: () => request<Meeting[]>("/api/meetings/upcoming"),
   recent: () => request<Meeting[]>("/api/meetings/recent"),

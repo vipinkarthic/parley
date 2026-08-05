@@ -43,6 +43,49 @@ def create_user(
     return user
 
 
+def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
+    """All other registered users, with live presence derived from whether they
+    currently have an active participant in a non-ended meeting."""
+    users = (
+        db.query(models.User)
+        .filter(models.User.id != exclude_user_id)
+        .order_by(models.User.name.asc())
+        .all()
+    )
+    busy_rows = (
+        db.query(models.Participant.user_id)
+        .join(models.Meeting, models.Meeting.id == models.Participant.meeting_id)
+        .filter(
+            models.Participant.is_active == True,  # noqa: E712
+            models.Participant.user_id.isnot(None),
+            models.Meeting.status != "ended",
+        )
+        .distinct()
+        .all()
+    )
+    busy = {r[0] for r in busy_rows}
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "avatar_color": u.avatar_color,
+            "status": "in-meeting" if u.id in busy else "available",
+        }
+        for u in users
+    ]
+
+
+def update_preferences(
+    db: Session, user: models.User, data: schemas.PreferencesUpdate
+) -> models.User:
+    for field, value in data.model_dump(exclude_none=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def upsert_pending_signup(
     db: Session,
     *,

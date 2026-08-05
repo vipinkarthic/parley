@@ -12,7 +12,7 @@ import { SoonBadge } from "./SoonBadge";
 const NAV_LINKS = [
   { label: "Home", href: "/", soon: false },
   { label: "Meetings", href: "/meetings", soon: false },
-  { label: "Contacts", href: "/contacts", soon: true },
+  { label: "Contacts", href: "/contacts", soon: false },
   { label: "Whiteboards", href: "/whiteboards", soon: true },
 ];
 

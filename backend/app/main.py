@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
 from .database import Base, SessionLocal, engine
-from .routers import auth, meetings
+from .routers import auth, meetings, users
 from .seed import seed_database
 from .ws import router as ws_router
 
@@ -40,6 +40,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(meetings.router)
+app.include_router(users.router)
 app.include_router(ws_router)
 
 

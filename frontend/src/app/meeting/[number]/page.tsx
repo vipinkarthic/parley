@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import type { JoinResult, Meeting, Participant } from "@/lib/types";
+import type { JoinResult, Meeting, Participant, Preferences } from "@/lib/types";
 import { useMeeting } from "@/lib/useMeeting";
 import { VideoTile } from "@/components/meeting/VideoTile";
 import { ControlBar } from "@/components/meeting/ControlBar";
@@ -39,6 +39,7 @@ export default function MeetingRoomPage() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joined, setJoined] = useState<JoinedState | null>(null);
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const pwd = search.get("pwd") || "";
@@ -65,6 +66,10 @@ export default function MeetingRoomPage() {
         } catch {
           setDefaultName("Guest");
         }
+      }
+      try {
+        setPrefs(await api.preferences());
+      } catch {
       }
       setPhase("preview");
     })();
@@ -166,6 +171,8 @@ export default function MeetingRoomPage() {
         requirePasscode={requirePasscode}
         joining={joining}
         error={joinError}
+        initialMicOn={prefs ? !prefs.pref_join_muted : true}
+        initialCamOn={prefs ? prefs.pref_video_on_join : true}
         onJoin={handleJoin}
       />
     );
@@ -176,6 +183,7 @@ export default function MeetingRoomPage() {
       number={number}
       meeting={meeting!}
       joined={joined!}
+      mirrorVideo={prefs ? prefs.pref_mirror_video : true}
       onExit={(p) => {
         stopStream();
         setPhase(p);
@@ -189,12 +197,14 @@ function LiveRoom({
   number,
   meeting,
   joined,
+  mirrorVideo,
   onExit,
   onToast,
 }: {
   number: string;
   meeting: Meeting;
   joined: JoinedState;
+  mirrorVideo: boolean;
   onExit: (phase: "left" | "removed" | "ended") => void;
   onToast: (m: string, k?: "success" | "error" | "info") => void;
 }) {
@@ -285,7 +295,7 @@ function LiveRoom({
     videoOn: m.isSharing ? true : m.camOn,
     hand: m.handRaised,
     sharing: m.isSharing,
-    mirror: !m.isSharing,
+    mirror: mirrorVideo && !m.isSharing,
     stream: m.isSharing ? m.screenStream : joined.stream,
   };
   const peerTiles: Tile[] = m.peers.map((p) => ({
