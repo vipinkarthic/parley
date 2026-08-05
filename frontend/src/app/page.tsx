@@ -12,12 +12,7 @@ import { useToast } from "@/components/Toast";
 import { useAuth } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import type { Meeting } from "@/lib/types";
-import {
-  CalendarIcon,
-  PlusIcon,
-  ScreenShareIcon,
-  VideoIcon,
-} from "@/components/Icons";
+import { CalendarIcon, PlusIcon, VideoIcon } from "@/components/Icons";
 
 export default function DashboardPage() {
   return (
@@ -105,7 +100,7 @@ function Dashboard() {
           </p>
         </div>
 
-        <section className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <section className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <ActionTile
             icon={<VideoIcon className="h-7 w-7" />}
             label="New Meeting"
@@ -129,13 +124,6 @@ function Dashboard() {
               setEditing(null);
               setScheduleOpen(true);
             }}
-          />
-          <ActionTile
-            icon={<ScreenShareIcon className="h-7 w-7" />}
-            label="Share Screen"
-            sublabel="Coming soon"
-            color="#12B76A"
-            onClick={() => toast("Screen sharing is coming soon", "info")}
           />
         </section>
 
