@@ -154,6 +154,11 @@ def get_active_instant_meeting(db: Session, host_id: int) -> models.Meeting | No
     )
 
 
+def _settings_kwargs(settings: "schemas.MeetingSettingsUpdate | None") -> dict:
+    """Only the settings fields the creator explicitly set (others use defaults)."""
+    return settings.model_dump(exclude_none=True) if settings else {}
+
+
 def create_instant_meeting(
     db: Session, data: schemas.InstantMeetingCreate, host: models.User
 ) -> models.Meeting:
@@ -170,6 +175,7 @@ def create_instant_meeting(
         status="active",
         start_time=datetime.now(),
         duration=60,
+        **_settings_kwargs(data.settings),
     )
 
 
@@ -185,6 +191,7 @@ def create_scheduled_meeting(
         status="scheduled",
         start_time=data.start_time,
         duration=data.duration,
+        **_settings_kwargs(data.settings),
     )
 
 
@@ -271,18 +278,69 @@ def add_participant(
     display_name: str,
     is_host: bool = False,
     user_id: int | None = None,
+    admission: str = "admitted",
 ) -> models.Participant:
     participant = models.Participant(
         meeting_id=meeting.id,
         display_name=display_name,
         is_host=is_host,
         user_id=user_id,
+        admission=admission,
         ws_token=uuid.uuid4().hex,
     )
     db.add(participant)
     db.commit()
     db.refresh(participant)
     return participant
+
+
+def set_admission(
+    db: Session, participant: models.Participant, admission: str
+) -> models.Participant:
+    participant.admission = admission
+    db.commit()
+    db.refresh(participant)
+    return participant
+
+
+def set_waiting_room(
+    db: Session, meeting: models.Meeting, enabled: bool
+) -> models.Meeting:
+    meeting.waiting_room = enabled
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+_SETTINGS_FIELDS = {
+    "waiting_room", "locked", "mute_on_entry", "join_before_host",
+    "allow_screen_share", "allow_unmute", "allow_video", "allow_rename",
+    "allow_chat", "allow_reactions",
+}
+
+
+def update_settings(db: Session, meeting: models.Meeting, patch: dict) -> models.Meeting:
+    for key, value in patch.items():
+        if key in _SETTINGS_FIELDS and value is not None:
+            setattr(meeting, key, value)
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+def host_present(db: Session, meeting: models.Meeting) -> bool:
+    """True if the meeting's host is currently an active, admitted participant."""
+    return (
+        db.query(models.Participant)
+        .filter(
+            models.Participant.meeting_id == meeting.id,
+            models.Participant.is_host == True,  # noqa: E712
+            models.Participant.is_active == True,  # noqa: E712
+            models.Participant.admission == "admitted",
+        )
+        .first()
+        is not None
+    )
 
 
 def active_meeting_for_user(

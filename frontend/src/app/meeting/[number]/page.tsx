@@ -4,20 +4,29 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import type { JoinResult, Meeting, Participant, Preferences } from "@/lib/types";
+import type { JoinResult, Meeting, Preferences } from "@/lib/types";
 import { useMeeting } from "@/lib/useMeeting";
 import { VideoTile } from "@/components/meeting/VideoTile";
 import { ControlBar } from "@/components/meeting/ControlBar";
-import { ParticipantsPanel } from "@/components/meeting/ParticipantsPanel";
+import { ParticipantsPanel, type PanelPerson } from "@/components/meeting/ParticipantsPanel";
 import { ChatPanel } from "@/components/meeting/ChatPanel";
 import { PreJoin } from "@/components/meeting/PreJoin";
 import { ReactionsOverlay } from "@/components/meeting/ReactionsOverlay";
 import { useToast } from "@/components/Toast";
-import { formatMeetingNumber } from "@/lib/utils";
-import { CheckIcon, CopyIcon, PinIcon, ShieldIcon } from "@/components/Icons";
+import { formatMeetingNumber, formatMeetingTime } from "@/lib/utils";
+import { CheckIcon, ClockIcon, CopyIcon, PinIcon, ShieldIcon } from "@/components/Icons";
 
 type Panel = "participants" | "chat" | null;
-type Phase = "loading" | "preview" | "in" | "notfound" | "left" | "removed" | "ended";
+type Phase =
+  | "loading"
+  | "scheduled"
+  | "preview"
+  | "in"
+  | "notfound"
+  | "left"
+  | "removed"
+  | "ended"
+  | "denied";
 
 interface JoinedState {
   join: JoinResult;
@@ -35,7 +44,7 @@ export default function MeetingRoomPage() {
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [defaultName, setDefaultName] = useState("Guest");
+  const [defaultName, setDefaultName] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joined, setJoined] = useState<JoinedState | null>(null);
@@ -64,14 +73,23 @@ export default function MeetingRoomPage() {
         try {
           setDefaultName((await api.me()).name);
         } catch {
-          setDefaultName("Guest");
+          setDefaultName("");
         }
       }
       try {
         setPrefs(await api.preferences());
       } catch {
       }
-      setPhase("preview");
+      const isHostViewer = !!m.passcode;
+      const notStarted =
+        m.meeting_type === "scheduled" &&
+        m.start_time !== null &&
+        new Date(m.start_time).getTime() > Date.now();
+      if (notStarted && !isHostViewer && !m.settings.join_before_host) {
+        setPhase("scheduled");
+      } else {
+        setPhase("preview");
+      }
     })();
   }, [number, search]);
 
@@ -99,6 +117,11 @@ export default function MeetingRoomPage() {
       setJoined({ join, name: o.name, stream: o.stream, micOn: o.micOn, camOn: o.camOn });
       setPhase("in");
     } catch (err) {
+      if (err instanceof ApiError && err.status === 425) {
+        setJoining(false);
+        setPhase("scheduled");
+        return;
+      }
       setJoinError(
         err instanceof ApiError ? err.message : "Could not join the meeting."
       );
@@ -135,6 +158,18 @@ export default function MeetingRoomPage() {
     );
   }
 
+  if (phase === "denied") {
+    return (
+      <Centered>
+        <p className="text-lg font-semibold">The host didn&apos;t admit you</p>
+        <p className="text-sm text-white/60">
+          Your request to join this meeting was declined.
+        </p>
+        <Link href="/" className="btn-primary mt-2">Back to home</Link>
+      </Centered>
+    );
+  }
+
   if (phase === "ended") {
     return (
       <Centered>
@@ -159,6 +194,15 @@ export default function MeetingRoomPage() {
           <button onClick={() => location.reload()} className="btn-primary">Rejoin</button>
         </div>
       </Centered>
+    );
+  }
+
+  if (phase === "scheduled" && meeting) {
+    return (
+      <ScheduledGate
+        meeting={meeting}
+        onReady={() => setPhase("preview")}
+      />
     );
   }
 
@@ -205,25 +249,39 @@ function LiveRoom({
   meeting: Meeting;
   joined: JoinedState;
   mirrorVideo: boolean;
-  onExit: (phase: "left" | "removed" | "ended") => void;
+  onExit: (phase: "left" | "removed" | "ended" | "denied") => void;
   onToast: (m: string, k?: "success" | "error" | "info") => void;
 }) {
   const isHost = joined.join.is_host;
   const myId = joined.join.id;
-  const myName = joined.name;
 
   const m = useMeeting({
     number,
     participantId: myId,
     wsToken: joined.join.ws_token,
-    displayName: myName,
+    displayName: joined.name,
     isHost,
     localStream: joined.stream,
-    initialMicOn: joined.micOn,
+    initialMicOn: joined.micOn && !(meeting.settings.mute_on_entry && !isHost),
     initialCamOn: joined.camOn,
+    initialAdmission: joined.join.admission,
+    initialSettings: meeting.settings,
     onRemoved: () => onExit("removed"),
     onEnded: () => onExit("ended"),
+    onDenied: () => onExit("denied"),
+    onAskUnmute: () => onToast("The host is asking you to unmute", "info"),
+    onShareDenied: () => onToast("The host has disabled screen sharing", "info"),
   });
+  const myName = m.myName;
+
+  const prevWaiting = useRef(0);
+  useEffect(() => {
+    if (isHost && m.waitingList.length > prevWaiting.current) {
+      const newest = m.waitingList[m.waitingList.length - 1];
+      onToast(`${newest.displayName} is waiting to join`, "info");
+    }
+    prevWaiting.current = m.waitingList.length;
+  }, [m.waitingList, isHost, onToast]);
 
   const [panel, setPanel] = useState<Panel>(null);
   const [view, setView] = useState<"gallery" | "speaker">("gallery");
@@ -265,9 +323,10 @@ function LiveRoom({
     m.muteAll();
     onToast("Muted everyone", "success");
   };
-  const handleRemove = (id: number, name: string) => {
+  const handleRemove = (id: number) => {
+    const peer = m.peers.find((p) => p.id === id);
     m.removePeer(id);
-    onToast(`${name} was removed`, "success");
+    onToast(`${peer?.displayName ?? "Participant"} was removed`, "success");
   };
   const endForAll = () => {
     m.endMeeting();
@@ -292,11 +351,11 @@ function LiveRoom({
     isSelf: true,
     isHost,
     muted: !m.micOn,
-    videoOn: m.isSharing ? true : m.camOn,
+    videoOn: m.camOn,
     hand: m.handRaised,
     sharing: m.isSharing,
-    mirror: mirrorVideo && !m.isSharing,
-    stream: m.isSharing ? m.screenStream : joined.stream,
+    mirror: mirrorVideo,
+    stream: joined.stream,
   };
   const peerTiles: Tile[] = m.peers.map((p) => ({
     key: p.id,
@@ -304,14 +363,21 @@ function LiveRoom({
     isSelf: false,
     isHost: p.isHost,
     muted: p.muted,
-    videoOn: p.sharing ? true : p.videoOn,
+    videoOn: p.videoOn,
     hand: p.hand,
     sharing: p.sharing,
     mirror: false,
-    stream: p.stream,
+    stream: p.cameraStream,
   }));
   const tiles = [selfTile, ...peerTiles];
   const total = tiles.length;
+
+  const screenShare: { name: string; stream: MediaStream | null } | null = m.isSharing
+    ? { name: `${myName} (You)`, stream: m.screenStream }
+    : (() => {
+        const sp = m.peers.find((p) => p.sharing && p.screenStream);
+        return sp ? { name: sp.displayName, stream: sp.screenStream } : null;
+      })();
 
   const renderTile = (t: Tile) => (
     <div key={t.key} className="group relative">
@@ -333,7 +399,7 @@ function LiveRoom({
           setView((v) => (pinnedId === t.key && v === "speaker" ? "gallery" : "speaker"));
         }}
         className="absolute right-2 bottom-2 hidden h-7 w-7 place-items-center rounded-md bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100 group-hover:grid"
-        title="Pin / spotlight"
+        title="Pin"
       >
         <PinIcon className="h-4 w-4" />
       </button>
@@ -347,20 +413,42 @@ function LiveRoom({
     : total <= 9 ? "grid-cols-2 lg:grid-cols-3"
     : "grid-cols-2 lg:grid-cols-4";
 
+  const focusKey = m.spotlightId ?? pinnedId;
   const mainTile =
-    tiles.find((t) => t.key === pinnedId) ||
-    tiles.find((t) => t.sharing) ||
+    tiles.find((t) => t.key === focusKey) ||
     tiles.find((t) => t.key === m.activeSpeakerId) ||
     selfTile;
   const filmstrip = tiles.filter((t) => t.key !== mainTile.key);
 
-  const panelParticipants: Participant[] = [
-    { id: myId, display_name: myName, is_host: isHost, is_muted: !m.micOn, is_video_on: m.camOn, is_active: true, joined_at: "" },
+  const people: PanelPerson[] = [
+    { id: myId, name: myName, isHost, muted: !m.micOn, hand: m.handRaised, isSelf: true },
     ...m.peers.map((p) => ({
-      id: p.id, display_name: p.displayName, is_host: p.isHost, is_muted: p.muted,
-      is_video_on: p.videoOn, is_active: true, joined_at: "",
+      id: p.id, name: p.displayName, isHost: p.isHost, muted: p.muted, hand: p.hand, isSelf: false,
     })),
   ];
+
+  if (m.admission === "waiting") {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zoom-dark px-4 text-center text-white">
+        <span className="h-12 w-12 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+        <div>
+          <p className="text-lg font-semibold">Please wait, the meeting host will let you in soon</p>
+          <p className="mt-1 text-sm text-white/60">
+            {m.hostPresent
+              ? `"${meeting.topic}" — waiting for the host to admit you`
+              : "Waiting for the host to start this meeting"}
+          </p>
+        </div>
+        <p className="text-sm text-white/50">Joining as {myName}</p>
+        <button
+          onClick={() => onExit("left")}
+          className="mt-2 rounded-full bg-white/10 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/20"
+        >
+          Leave
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-zoom-dark text-white">
@@ -399,11 +487,47 @@ function LiveRoom({
         </div>
       </header>
 
+      {isHost && m.waitingList.length > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-[#FFB020] px-4 py-2 text-sm font-medium text-[#1A1A24]">
+          <span>
+            {m.waitingList.length === 1
+              ? `${m.waitingList[0].displayName} is waiting`
+              : `${m.waitingList.length} people are waiting`}{" "}
+            to join
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPanel("participants")}
+              className="rounded-full bg-black/10 px-3 py-1 text-xs font-semibold hover:bg-black/20"
+            >
+              View
+            </button>
+            <button
+              onClick={m.admitAll}
+              className="rounded-full bg-[#1A1A24] px-3 py-1 text-xs font-semibold text-white hover:bg-black"
+            >
+              Admit all
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto p-3 sm:p-5">
-            {view === "gallery" ? (
-              <div className={`grid gap-3 ${galleryClass}`}>{tiles.map(renderTile)}</div>
+          <div className="flex-1 overflow-hidden p-3 sm:p-5">
+            {screenShare ? (
+              <div className="flex h-full gap-3">
+                <div className="min-w-0 flex-1">
+                  <ScreenView name={screenShare.name} stream={screenShare.stream} />
+                </div>
+                <div className="scroll-thin-dark flex w-44 shrink-0 flex-col gap-3 overflow-y-auto sm:w-52">
+                  {tiles.map(renderTile)}
+                </div>
+              </div>
+            ) : view === "gallery" ? (
+              <div className={`grid h-full gap-3 overflow-y-auto ${galleryClass}`}>
+                {tiles.map(renderTile)}
+              </div>
             ) : (
               <div className="flex h-full flex-col gap-3">
                 <div className="min-h-0 flex-1">{renderTile(mainTile)}</div>
@@ -419,7 +543,7 @@ function LiveRoom({
               </div>
             )}
 
-            {total === 1 && (
+            {total === 1 && !screenShare && (
               <p className="mt-6 text-center text-sm text-white/50">
                 You&apos;re the only one here. Share the invite link to bring others in.
               </p>
@@ -434,16 +558,31 @@ function LiveRoom({
             <aside className="fixed inset-y-0 right-0 z-30 w-[340px] max-w-[85vw] bg-white text-zoom-ink shadow-modal md:static md:z-0 md:w-[340px] md:shadow-none md:ring-1 md:ring-zoom-line">
               {panel === "participants" ? (
                 <ParticipantsPanel
-                  participants={panelParticipants}
-                  myId={myId}
+                  people={people}
+                  waiting={m.waitingList}
                   isHost={isHost}
+                  waitingRoomOn={m.waitingRoomOn}
+                  allowRename={m.settings.allow_rename}
                   onClose={() => setPanel(null)}
-                  onToggleMute={(p) => m.mutePeer(p.id)}
-                  onRemove={(p) => handleRemove(p.id, p.display_name)}
+                  onMute={m.mutePeer}
+                  onAskUnmute={m.askToUnmute}
+                  onRemove={handleRemove}
+                  onSpotlight={m.spotlight}
+                  onLowerHand={m.lowerHand}
+                  onRenameSelf={m.renameSelf}
                   onMuteAll={handleMuteAll}
+                  onAdmit={m.admitPeer}
+                  onDeny={m.denyPeer}
+                  onAdmitAll={m.admitAll}
+                  onToggleWaitingRoom={m.toggleWaitingRoom}
                 />
               ) : (
-                <ChatPanel messages={m.messages} onSend={m.sendChat} onClose={() => setPanel(null)} />
+                <ChatPanel
+                  messages={m.messages}
+                  onSend={m.sendChat}
+                  onClose={() => setPanel(null)}
+                  disabled={!isHost && !m.settings.allow_chat}
+                />
               )}
             </aside>
           </>
@@ -465,6 +604,8 @@ function LiveRoom({
         view={view}
         onToggleView={() => setView((v) => (v === "gallery" ? "speaker" : "gallery"))}
         isHost={isHost}
+        settings={m.settings}
+        onUpdateSettings={m.updateSettings}
         onMuteAll={handleMuteAll}
         onLeave={() => onExit("left")}
         onEndForAll={endForAll}
@@ -490,4 +631,68 @@ function formatElapsed(s: number): string {
   const sec = s % 60;
   const pad = (n: number) => n.toString().padStart(2, "0");
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
+
+function ScreenView({ name, stream }: { name: string; stream: MediaStream | null }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (ref.current && stream && ref.current.srcObject !== stream) {
+      ref.current.srcObject = stream;
+    }
+  }, [stream]);
+  return (
+    <div className="relative flex h-full items-center justify-center overflow-hidden rounded-xl bg-black ring-1 ring-white/10">
+      <video ref={ref} autoPlay playsInline muted className="max-h-full max-w-full object-contain" />
+      <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-sm">
+        {name} is sharing
+      </div>
+    </div>
+  );
+}
+
+function ScheduledGate({
+  meeting,
+  onReady,
+}: {
+  meeting: Meeting;
+  onReady: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  const start = meeting.start_time ? new Date(meeting.start_time).getTime() : 0;
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (start && now >= start) onReady();
+  }, [now, start, onReady]);
+
+  const remaining = Math.max(0, Math.floor((start - now) / 1000));
+  const d = Math.floor(remaining / 86400);
+  const h = Math.floor((remaining % 86400) / 3600);
+  const mm = Math.floor((remaining % 3600) / 60);
+  const ss = remaining % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const countdown =
+    d > 0 ? `${d}d ${h}h ${mm}m` : h > 0 ? `${h}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+
+  return (
+    <Centered>
+      <div className="mx-auto mb-1 grid h-14 w-14 place-items-center rounded-full bg-white/10">
+        <ClockIcon className="h-7 w-7 text-white/80" />
+      </div>
+      <p className="text-lg font-semibold">{meeting.topic}</p>
+      <p className="text-sm text-white/60">
+        This meeting is scheduled for {formatMeetingTime(meeting.start_time)}
+      </p>
+      <p className="mt-2 text-3xl font-bold tabular-nums">{countdown}</p>
+      <p className="text-xs text-white/50">until it starts — you&apos;ll join automatically</p>
+      <Link
+        href="/"
+        className="btn-outline mt-4 !border-white/30 !bg-transparent !text-white hover:!bg-white/10"
+      >
+        Back to home
+      </Link>
+    </Centered>
+  );
 }

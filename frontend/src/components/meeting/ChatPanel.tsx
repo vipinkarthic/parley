@@ -15,10 +15,12 @@ export function ChatPanel({
   messages,
   onSend,
   onClose,
+  disabled = false,
 }: {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onClose: () => void;
+  disabled?: boolean;
 }) {
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -29,7 +31,7 @@ export function ChatPanel({
 
   const send = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (disabled || !text.trim()) return;
     onSend(text.trim());
     setText("");
   };
@@ -77,21 +79,27 @@ export function ChatPanel({
       </div>
 
       <form onSubmit={send} className="border-t border-zoom-line p-3">
-        <div className="flex items-center gap-2">
-          <input
-            className="input"
-            placeholder="Type a message…"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={!text.trim()}
-            className="btn-primary shrink-0 !px-4"
-          >
-            Send
-          </button>
-        </div>
+        {disabled ? (
+          <p className="py-1 text-center text-xs text-zoom-muted">
+            Chat has been disabled by the host
+          </p>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              className="input"
+              placeholder="Type a message…"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={!text.trim()}
+              className="btn-primary shrink-0 !px-4"
+            >
+              Send
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );

@@ -90,7 +90,11 @@ export function PreJoin({
     });
   };
 
-  const canJoin = name.trim().length > 0 && (!requirePasscode || passcode.trim().length > 0);
+  const deviceReady = stream !== null || denied;
+  const canJoin =
+    deviceReady &&
+    name.trim().length > 0 &&
+    (!requirePasscode || passcode.trim().length > 0);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,7 +192,7 @@ export function PreJoin({
             {error && <p className="text-sm text-[#FF6B6B]">{error}</p>}
 
             <button type="submit" disabled={!canJoin || joining} className="btn-primary w-full">
-              {joining ? "Joining…" : "Join now"}
+              {joining ? "Joining…" : !deviceReady ? "Preparing devices…" : "Join now"}
             </button>
             <p className="text-center text-xs text-white/40">
               {micOn ? "Mic on" : "Mic off"} · {camOn ? "Camera on" : "Camera off"}

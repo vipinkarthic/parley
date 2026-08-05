@@ -95,6 +95,7 @@ class ParticipantJoinOut(ParticipantOut):
     the general participants list)."""
     ws_token: str
     is_meeting_host: bool
+    admission: str
 
 
 class ScheduledMeetingUpdate(BaseModel):
@@ -104,6 +105,35 @@ class ScheduledMeetingUpdate(BaseModel):
     duration: int = Field(default=30, ge=5, le=1440)
 
 
+class MeetingSettings(BaseModel):
+    """Host-controlled per-meeting settings (host always bypasses the allow_*)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    waiting_room: bool
+    locked: bool
+    mute_on_entry: bool
+    join_before_host: bool
+    allow_screen_share: bool
+    allow_unmute: bool
+    allow_video: bool
+    allow_rename: bool
+    allow_chat: bool
+    allow_reactions: bool
+
+
+class MeetingSettingsUpdate(BaseModel):
+    waiting_room: bool | None = None
+    locked: bool | None = None
+    mute_on_entry: bool | None = None
+    join_before_host: bool | None = None
+    allow_screen_share: bool | None = None
+    allow_unmute: bool | None = None
+    allow_video: bool | None = None
+    allow_rename: bool | None = None
+    allow_chat: bool | None = None
+    allow_reactions: bool | None = None
+
+
 class MeetingBase(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
@@ -111,11 +141,13 @@ class MeetingBase(BaseModel):
 
 class InstantMeetingCreate(MeetingBase):
     topic: str = Field(default="My Meeting", max_length=200)
+    settings: MeetingSettingsUpdate | None = None
 
 
 class ScheduledMeetingCreate(MeetingBase):
     start_time: datetime
     duration: int = Field(default=30, ge=5, le=1440)
+    settings: MeetingSettingsUpdate | None = None
 
 
 class MeetingOut(BaseModel):
@@ -126,6 +158,7 @@ class MeetingOut(BaseModel):
     topic: str
     description: str | None
     passcode: str | None
+    settings: MeetingSettings
     meeting_type: str
     status: str
     start_time: datetime | None

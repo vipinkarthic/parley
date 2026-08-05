@@ -2,6 +2,7 @@ import type {
   Contact,
   JoinResult,
   Meeting,
+  MeetingSettings,
   Participant,
   Preferences,
   User,
@@ -127,6 +128,7 @@ export const api = {
     description?: string;
     start_time: string;
     duration: number;
+    settings?: Partial<MeetingSettings>;
   }) =>
     request<Meeting>("/api/meetings/schedule", {
       method: "POST",

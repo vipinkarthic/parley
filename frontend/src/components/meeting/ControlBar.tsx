@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import type { MeetingSettings } from "@/lib/types";
+import { SecurityMenu } from "./SecurityMenu";
 import {
   ChatIcon,
   HandIcon,
@@ -21,18 +23,24 @@ function Control({
   label,
   onClick,
   active = false,
+  disabled = false,
+  title,
   badge,
 }: {
   icon: ReactNode;
   label: string;
   onClick?: () => void;
   active?: boolean;
+  disabled?: boolean;
+  title?: string;
   badge?: number;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex min-w-[60px] flex-col items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+      disabled={disabled}
+      title={title}
+      className={`relative flex min-w-[60px] flex-col items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         active ? "text-zoom-blue" : "text-white/85 hover:bg-white/10"
       }`}
     >
@@ -62,6 +70,8 @@ export function ControlBar({
   view,
   onToggleView,
   isHost,
+  settings,
+  onUpdateSettings,
   onMuteAll,
   onLeave,
   onEndForAll,
@@ -83,6 +93,8 @@ export function ControlBar({
   view: "gallery" | "speaker";
   onToggleView: () => void;
   isHost: boolean;
+  settings: MeetingSettings;
+  onUpdateSettings: (patch: Partial<MeetingSettings>) => void;
   onMuteAll: () => void;
   onLeave: () => void;
   onEndForAll: () => void;
@@ -93,17 +105,26 @@ export function ControlBar({
   const [reactOpen, setReactOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
 
+  const cantUnmute = !isHost && !micOn && !settings.allow_unmute;
+  const cantStartVideo = !isHost && !camOn && !settings.allow_video;
+  const cantShare = !isHost && !settings.allow_screen_share;
+  const cantReact = !isHost && !settings.allow_reactions;
+
   return (
     <div className="flex items-center justify-center gap-0.5 border-t border-white/10 bg-zoom-darker px-2 py-2.5">
       <Control
         icon={micOn ? <MicIcon className="h-5 w-5" /> : <MicOffIcon className="h-5 w-5 text-[#FF6B6B]" />}
         label={micOn ? "Mute" : "Unmute"}
         onClick={onToggleMic}
+        disabled={cantUnmute}
+        title={cantUnmute ? "The host has disabled unmuting" : undefined}
       />
       <Control
         icon={camOn ? <VideoCamIcon className="h-5 w-5" /> : <VideoOffIcon className="h-5 w-5 text-[#FF6B6B]" />}
         label={camOn ? "Stop Video" : "Start Video"}
         onClick={onToggleCam}
+        disabled={cantStartVideo}
+        title={cantStartVideo ? "The host has disabled starting video" : undefined}
       />
 
       <div className="mx-1 h-8 w-px bg-white/10" />
@@ -121,6 +142,8 @@ export function ControlBar({
         label={isSharing ? "Stop Share" : "Share"}
         onClick={onToggleShare}
         active={isSharing}
+        disabled={cantShare}
+        title={cantShare ? "Only the host can share" : undefined}
       />
 
       <div className="relative">
@@ -129,6 +152,8 @@ export function ControlBar({
           label="React"
           onClick={() => setReactOpen((v) => !v)}
           active={reactOpen}
+          disabled={cantReact}
+          title={cantReact ? "The host has disabled reactions" : undefined}
         />
         {reactOpen && (
           <>
@@ -158,12 +183,15 @@ export function ControlBar({
         active={handRaised}
       />
       <Control
-        icon={<span className="grid h-5 w-5 grid-cols-2 gap-0.5">{[0,1,2,3].map(i=>(<span key={i} className="rounded-[1px] bg-current" />))}</span>}
+        icon={<span className="grid h-5 w-5 grid-cols-2 gap-0.5">{[0, 1, 2, 3].map((i) => (<span key={i} className="rounded-[1px] bg-current" />))}</span>}
         label={view === "gallery" ? "Speaker" : "Gallery"}
         onClick={onToggleView}
       />
       {isHost && (
-        <Control icon={<ShieldIcon className="h-5 w-5" />} label="Mute All" onClick={onMuteAll} />
+        <>
+          <Control icon={<ShieldIcon className="h-5 w-5" />} label="Mute All" onClick={onMuteAll} />
+          <SecurityMenu settings={settings} onUpdate={onUpdateSettings} />
+        </>
       )}
 
       <div className="mx-1 h-8 w-px bg-white/10" />

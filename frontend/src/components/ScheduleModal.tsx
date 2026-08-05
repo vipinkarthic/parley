@@ -43,6 +43,11 @@ export function ScheduleModal({
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<Meeting | null>(null);
 
+  const [optWaitingRoom, setOptWaitingRoom] = useState(true);
+  const [optMuteOnEntry, setOptMuteOnEntry] = useState(false);
+  const [optHostOnlyShare, setOptHostOnlyShare] = useState(false);
+  const [optJoinBeforeHost, setOptJoinBeforeHost] = useState(false);
+
   useEffect(() => {
     if (open && editing) {
       setTopic(editing.topic);
@@ -64,6 +69,10 @@ export function ScheduleModal({
     setTime(init.time);
     setDuration(30);
     setCreated(null);
+    setOptWaitingRoom(true);
+    setOptMuteOnEntry(false);
+    setOptHostOnlyShare(false);
+    setOptJoinBeforeHost(false);
   };
 
   const close = () => {
@@ -89,7 +98,15 @@ export function ScheduleModal({
         toast("Meeting updated", "success");
         close();
       } else {
-        const meeting = await api.schedule(payload);
+        const meeting = await api.schedule({
+          ...payload,
+          settings: {
+            waiting_room: optWaitingRoom,
+            mute_on_entry: optMuteOnEntry,
+            allow_screen_share: !optHostOnlyShare,
+            join_before_host: optJoinBeforeHost,
+          },
+        });
         setCreated(meeting);
         onScheduled();
         toast("Meeting scheduled", "success");
@@ -228,6 +245,19 @@ export function ScheduleModal({
               ))}
             </select>
           </div>
+          {!isEdit && (
+            <div className="rounded-xl border border-zoom-line p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zoom-muted">
+                Options
+              </p>
+              <div className="space-y-1">
+                <Opt label="Enable waiting room" checked={optWaitingRoom} onChange={setOptWaitingRoom} />
+                <Opt label="Mute participants on entry" checked={optMuteOnEntry} onChange={setOptMuteOnEntry} />
+                <Opt label="Only host can share screen" checked={optHostOnlyShare} onChange={setOptHostOnlyShare} />
+                <Opt label="Allow participants to join before host" checked={optJoinBeforeHost} onChange={setOptJoinBeforeHost} />
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between pt-1">
             <span className="inline-flex items-center gap-1.5 text-xs text-zoom-muted">
               <CalendarIcon className="h-4 w-4" />
@@ -262,5 +292,27 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-zoom-muted">{label}</span>
       <span className="font-medium text-zoom-ink">{children}</span>
     </div>
+  );
+}
+
+function Opt({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm text-zoom-ink hover:bg-zoom-field">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 accent-zoom-blue"
+      />
+      {label}
+    </label>
   );
 }

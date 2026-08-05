@@ -16,6 +16,7 @@ def meeting_out(
         topic=meeting.topic,
         description=meeting.description,
         passcode=meeting.passcode if is_host_viewer else None,
+        settings=schemas.MeetingSettings.model_validate(meeting),
         meeting_type=meeting.meeting_type,
         status=meeting.status,
         start_time=meeting.start_time,

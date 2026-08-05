@@ -5,12 +5,26 @@ export interface User {
   avatar_color: string;
 }
 
+export interface MeetingSettings {
+  waiting_room: boolean;
+  locked: boolean;
+  mute_on_entry: boolean;
+  join_before_host: boolean;
+  allow_screen_share: boolean;
+  allow_unmute: boolean;
+  allow_video: boolean;
+  allow_rename: boolean;
+  allow_chat: boolean;
+  allow_reactions: boolean;
+}
+
 export interface Meeting {
   id: string;
   meeting_number: string;
   topic: string;
   description: string | null;
   passcode: string | null;
+  settings: MeetingSettings;
   meeting_type: "instant" | "scheduled";
   status: "scheduled" | "active" | "ended";
   start_time: string | null;
@@ -34,6 +48,12 @@ export interface Participant {
 export interface JoinResult extends Participant {
   ws_token: string;
   is_meeting_host: boolean;
+  admission: "admitted" | "waiting";
+}
+
+export interface WaitingPerson {
+  id: number;
+  displayName: string;
 }
 
 export interface Contact {

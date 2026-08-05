@@ -87,6 +87,16 @@ class Meeting(Base):
 
     meeting_type: Mapped[str] = mapped_column(String(20), default="instant")
     status: Mapped[str] = mapped_column(String(20), default="active")
+    waiting_room: Mapped[bool] = mapped_column(Boolean, default=True)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    mute_on_entry: Mapped[bool] = mapped_column(Boolean, default=False)
+    join_before_host: Mapped[bool] = mapped_column(Boolean, default=False)
+    allow_screen_share: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_unmute: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_video: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_rename: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_chat: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_reactions: Mapped[bool] = mapped_column(Boolean, default=True)
 
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration: Mapped[int] = mapped_column(Integer, default=30)
@@ -115,6 +125,7 @@ class Participant(Base):
     is_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_video_on: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    admission: Mapped[str] = mapped_column(String(12), default="admitted")
     # secret the client sends back on the socket - peers only see the numeric id so nobody can fake being the host
     ws_token: Mapped[str] = mapped_column(String(40), default="")
 
