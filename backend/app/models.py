@@ -2,11 +2,11 @@
 
 Schema design
 -------------
-users          — application accounts. A single default user is seeded because
+users          - application accounts. A single default user is seeded because
                  the assignment assumes "a default user is logged in".
-meetings       — every meeting (instant or scheduled) with a unique 11-digit
+meetings       - every meeting (instant or scheduled) with a unique 11-digit
                  Zoom-style meeting number, host relationship, and status.
-participants   — join records for a meeting; drives the participants panel and
+participants   - join records for a meeting; drives the participants panel and
                  host controls (mute / remove).
 
 Relationships

@@ -53,13 +53,13 @@ def send_otp_email(to_email: str, code: str) -> bool:
     """Send the OTP.
 
     Returns True if a real email was dispatched, False in dev mode (no SMTP
-    credentials — the code is logged instead). Raises ``EmailSendError`` when
+    credentials - the code is logged instead). Raises ``EmailSendError`` when
     delivery is configured but fails, so the caller can surface a clean error
     rather than leaking a 500 (and never fall back to exposing the code).
     """
     if not config.EMAIL_ENABLED:
         logger.warning(
-            "[DEV] Email not configured — OTP for %s is: %s", to_email, code
+            "[DEV] Email not configured - OTP for %s is: %s", to_email, code
         )
         print(f"\n>>> [DEV OTP] {to_email} -> {code}\n", flush=True)
         return False

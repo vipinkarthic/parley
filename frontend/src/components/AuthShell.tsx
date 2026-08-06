@@ -49,7 +49,7 @@ function BrandPanel() {
           Bring everyone together, anywhere
         </h2>
         <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-white/80">
-          HD video meetings — instant or scheduled — with screen sharing, chat,
+          HD video meetings - instant or scheduled - with screen sharing, chat,
           reactions and host controls, right in your browser.
         </p>
 

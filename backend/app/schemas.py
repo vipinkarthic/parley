@@ -105,7 +105,7 @@ class ParticipantJoin(BaseModel):
 
 
 class ParticipantJoinOut(ParticipantOut):
-    """Join response — includes the private WebSocket token (not exposed in
+    """Join response - includes the private WebSocket token (not exposed in
     the general participants list)."""
     ws_token: str
     is_meeting_host: bool

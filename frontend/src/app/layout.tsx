@@ -11,7 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Zoom Clone — Video Conferencing",
+  title: "Zoom Clone - Video Conferencing",
   description:
     "A Zoom-style video conferencing platform: start instant meetings, schedule, and join with a meeting ID.",
 };

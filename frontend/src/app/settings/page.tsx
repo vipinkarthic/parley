@@ -320,7 +320,7 @@ function ProfileTab({
                 disabled={savingName || !name.trim() || name.trim() === user.name}
                 className="btn-primary shrink-0"
               >
-                {savingName ? "Saving…" : "Save"}
+                {savingName ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
@@ -332,7 +332,7 @@ function ProfileTab({
       </Card>
 
       <Card title="Personal Meeting Room">
-        <p className="text-sm text-zoom-muted">Your permanent meeting ID — reuse it any time.</p>
+        <p className="text-sm text-zoom-muted">Your permanent meeting ID - reuse it any time.</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <span className="rounded-lg bg-zoom-field px-3 py-2 font-mono text-lg font-semibold text-zoom-ink">
             {formatMeetingNumber(user.pmi)}
@@ -389,7 +389,7 @@ function AccountTab() {
           <input id="cfm" type="password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
         </div>
         <button type="submit" disabled={busy || !current || !next || !confirm} className="btn-primary">
-          {busy ? "Updating…" : "Update password"}
+          {busy ? "Updating..." : "Update password"}
         </button>
       </form>
     </Card>

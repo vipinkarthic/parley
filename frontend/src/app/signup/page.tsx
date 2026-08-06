@@ -152,7 +152,7 @@ export default function SignupPage() {
                   }
                   className="btn-primary w-full"
                 >
-                  {submitting ? "Sending code…" : "Continue"}
+                  {submitting ? "Sending code..." : "Continue"}
                 </button>
               </form>
             </>
@@ -196,7 +196,7 @@ export default function SignupPage() {
                   disabled={code.length !== 6 || submitting}
                   className="btn-primary w-full"
                 >
-                  {submitting ? "Verifying…" : "Verify & Create Account"}
+                  {submitting ? "Verifying..." : "Verify & Create Account"}
                 </button>
               </form>
 

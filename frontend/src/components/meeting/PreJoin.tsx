@@ -95,6 +95,7 @@ export function PreJoin({
     });
   };
 
+  // don't let them join until the camera/mic are actually ready, or we'd go in with a null stream
   const deviceReady = stream !== null || denied;
   const canJoin =
     deviceReady &&
@@ -197,7 +198,7 @@ export function PreJoin({
             {error && <p className="text-sm text-[#FF6B6B]">{error}</p>}
 
             <button type="submit" disabled={!canJoin || joining} className="btn-primary w-full">
-              {joining ? "Joining…" : !deviceReady ? "Preparing devices…" : "Join now"}
+              {joining ? "Joining..." : !deviceReady ? "Preparing devices..." : "Join now"}
             </button>
             <p className="text-center text-xs text-white/40">
               {micOn ? "Mic on" : "Mic off"} · {camOn ? "Camera on" : "Camera off"}

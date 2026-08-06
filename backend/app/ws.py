@@ -1,8 +1,8 @@
 """WebSocket signalling server for real-time WebRTC meetings + waiting room.
 
 Two spaces per meeting:
-  • room   — admitted participants; the WebRTC mesh + presence/chat/host events.
-  • lobby  — participants held in the waiting room until the host admits them.
+  • room   - admitted participants; the WebRTC mesh + presence/chat/host events.
+  • lobby  - participants held in the waiting room until the host admits them.
 
 The server only relays signalling; browsers do the media. Host status and
 admission are decided server-side (from the DB via a per-participant token),

@@ -76,7 +76,7 @@ export default function LoginPage() {
     >
       <h1 className="text-[28px] font-semibold text-zoom-ink">Sign in</h1>
       <p className="mt-1 text-sm text-zoom-muted">
-        Welcome back — sign in to start meeting.
+        Welcome back - sign in to start meeting.
       </p>
 
       <form onSubmit={submit} className="mt-8 space-y-4">
@@ -117,7 +117,7 @@ export default function LoginPage() {
               disabled={!email.trim() || !password || submitting}
               className="btn-primary w-full"
             >
-              {submitting ? "Signing in…" : "Sign In"}
+              {submitting ? "Signing in..." : "Sign In"}
             </button>
           </form>
 

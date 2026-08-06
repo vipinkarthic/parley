@@ -70,7 +70,7 @@ export function JoinModal({
             <p className="mt-1.5 text-xs text-[#EF4444]">{error}</p>
           ) : (
             <p className="mt-1.5 text-xs text-zoom-muted">
-              You can paste a full invite link — we&apos;ll pull out the ID.
+              You can paste a full invite link - we&apos;ll pull out the ID.
             </p>
           )}
         </div>
@@ -83,7 +83,7 @@ export function JoinModal({
             disabled={!canJoin || checking}
             className="btn-primary"
           >
-            {checking ? "Checking…" : "Join"}
+            {checking ? "Checking..." : "Join"}
           </button>
         </div>
       </form>

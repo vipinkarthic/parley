@@ -133,7 +133,7 @@ export default function MeetingRoomPage() {
     return (
       <Centered>
         <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
-        <p className="text-sm text-white/70">Loading meeting…</p>
+        <p className="text-sm text-white/70">Loading meeting...</p>
       </Centered>
     );
   }
@@ -436,7 +436,7 @@ function LiveRoom({
           <p className="text-lg font-semibold">Please wait, the meeting host will let you in soon</p>
           <p className="mt-1 text-sm text-white/60">
             {m.hostPresent
-              ? `"${meeting.topic}" — waiting for the host to admit you`
+              ? `"${meeting.topic}" - waiting for the host to admit you`
               : "Waiting for the host to start this meeting"}
           </p>
         </div>
@@ -473,7 +473,7 @@ function LiveRoom({
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${m.status === "live" ? "bg-[#12B76A]" : "bg-white/50"}`} />
-            {m.status === "live" ? "Live" : m.status === "error" ? "Reconnecting…" : "Connecting…"}
+            {m.status === "live" ? "Live" : m.status === "error" ? "Reconnecting..." : "Connecting..."}
           </span>
           <span className="hidden rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium tabular-nums sm:block">
             {formatElapsed(elapsed)}
@@ -687,7 +687,7 @@ function ScheduledGate({
         This meeting is scheduled for {formatMeetingTime(meeting.start_time)}
       </p>
       <p className="mt-2 text-3xl font-bold tabular-nums">{countdown}</p>
-      <p className="text-xs text-white/50">until it starts — you&apos;ll join automatically</p>
+      <p className="text-xs text-white/50">until it starts - you&apos;ll join automatically</p>
       <Link
         href="/"
         className="btn-outline mt-4 !border-white/30 !bg-transparent !text-white hover:!bg-white/10"

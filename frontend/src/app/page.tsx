@@ -167,7 +167,7 @@ function Dashboard() {
           <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-8 py-7 shadow-modal">
             <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-zoom-line border-t-zoom-blue" />
             <p className="text-sm font-medium text-zoom-ink">
-              Starting your meeting…
+              Starting your meeting...
             </p>
           </div>
         </div>

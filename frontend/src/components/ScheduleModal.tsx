@@ -273,7 +273,7 @@ export function ScheduleModal({
                 className="btn-primary"
               >
                 {submitting
-                  ? "Saving…"
+                  ? "Saving..."
                   : isEdit
                   ? "Save changes"
                   : "Schedule"}

@@ -87,7 +87,7 @@ export function ChatPanel({
           <div className="flex items-center gap-2">
             <input
               className="input"
-              placeholder="Type a message…"
+              placeholder="Type a message..."
               value={text}
               onChange={(e) => setText(e.target.value)}
             />

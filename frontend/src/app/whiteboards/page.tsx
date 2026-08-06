@@ -30,7 +30,7 @@ export default function WhiteboardsPage() {
         <span className="rounded-full bg-zoom-blue px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
           Coming soon
         </span>
-        Whiteboards are a preview — the boards below are samples and aren&apos;t
+        Whiteboards are a preview - the boards below are samples and aren&apos;t
         editable yet.
       </div>
 
