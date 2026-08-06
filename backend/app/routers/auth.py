@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .. import config, crud, models, schemas
 from ..database import get_db
 from ..deps import get_current_user
-from ..emailer import send_otp_email
+from ..emailer import EmailSendError, send_otp_email
 from ..security import (
     create_access_token,
     hash_code,
@@ -21,6 +21,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _new_otp() -> str:
     return f"{random.randint(0, 999999):06d}"
+
+
+def _dispatch_otp(email: str, code: str) -> bool:
+    """Send the OTP, converting a delivery failure into a clean 502."""
+    try:
+        return send_otp_email(email, code)
+    except EmailSendError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
 
 
 @router.post("/signup/request-otp", response_model=schemas.OtpRequestResponse)
@@ -40,7 +50,7 @@ def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db
         code_hash=hash_code(code),
         expires_at=datetime.now() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
-    email_sent = send_otp_email(data.email, code)
+    email_sent = _dispatch_otp(data.email, code)
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
@@ -65,7 +75,7 @@ def resend_signup_otp(data: schemas.ResendOtpRequest, db: Session = Depends(get_
         code_hash=hash_code(code),
         expires_at=datetime.now() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
-    email_sent = send_otp_email(data.email, code)
+    email_sent = _dispatch_otp(data.email, code)
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,

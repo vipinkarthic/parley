@@ -130,23 +130,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="my-6 flex items-center gap-3 text-xs text-zoom-subtle">
-            <span className="h-px flex-1 bg-zoom-line" />
-            OR
-            <span className="h-px flex-1 bg-zoom-line" />
-          </div>
-          <button
-            type="button"
-            disabled
-            title="Coming soon"
-            className="flex w-full items-center justify-center gap-2 rounded-full border border-zoom-line bg-white px-5 py-2.5 text-[15px] font-semibold text-zoom-muted opacity-70"
-          >
-            Continue with Google
-            <span className="rounded-full bg-zoom-field px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zoom-subtle">
-              Soon
-            </span>
-          </button>
-
           {demos.length > 0 && (
             <div className="mt-6 rounded-xl border border-dashed border-zoom-line bg-zoom-field/60 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zoom-muted">

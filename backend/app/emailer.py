@@ -14,6 +14,10 @@ from . import config
 logger = logging.getLogger("zoomclone.email")
 
 
+class EmailSendError(Exception):
+    """Raised when real email delivery is configured but the send failed."""
+
+
 def _build_message(to_email: str, code: str) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = f"{code} is your Zoom Clone verification code"
@@ -46,7 +50,13 @@ def _build_message(to_email: str, code: str) -> EmailMessage:
 
 
 def send_otp_email(to_email: str, code: str) -> bool:
-    """Send the OTP. Returns True if a real email was dispatched."""
+    """Send the OTP.
+
+    Returns True if a real email was dispatched, False in dev mode (no SMTP
+    credentials — the code is logged instead). Raises ``EmailSendError`` when
+    delivery is configured but fails, so the caller can surface a clean error
+    rather than leaking a 500 (and never fall back to exposing the code).
+    """
     if not config.EMAIL_ENABLED:
         logger.warning(
             "[DEV] Email not configured — OTP for %s is: %s", to_email, code
@@ -56,9 +66,23 @@ def send_otp_email(to_email: str, code: str) -> bool:
 
     msg = _build_message(to_email, code)
     context = ssl.create_default_context()
-    with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as server:
-        server.starttls(context=context)
-        server.login(config.SMTP_USER, config.SMTP_PASS)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(
+            config.SMTP_HOST, config.SMTP_PORT, timeout=config.SMTP_TIMEOUT
+        ) as server:
+            server.starttls(context=context)
+            server.login(config.SMTP_USER, config.SMTP_PASS)
+            server.send_message(msg)
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.error("SMTP auth failed for %s: %s", config.SMTP_USER, exc)
+        raise EmailSendError(
+            "Email sign-in was rejected. Check the Gmail App Password."
+        ) from exc
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.error("SMTP send to %s failed: %s", to_email, exc)
+        raise EmailSendError(
+            "We couldn't send the verification email. Please try again."
+        ) from exc
+
     logger.info("OTP email sent to %s", to_email)
     return True
