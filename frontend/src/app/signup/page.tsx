@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ZoomLogo } from "@/components/ZoomLogo";
+import { AuthShell } from "@/components/AuthShell";
 import { useAuth } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { CheckIcon } from "@/components/Icons";
@@ -78,31 +78,24 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-white">
-      <header className="border-b border-zoom-line">
-        <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between px-6">
-          <Link href="/login">
-            <ZoomLogo />
+    <AuthShell
+      headerRight={
+        <>
+          Already have an account?{" "}
+          <Link href="/login" className="font-semibold text-zoom-blue hover:underline">
+            Sign In
           </Link>
-          <p className="text-sm text-zoom-muted">
-            Already have an account?{" "}
-            <Link href="/login" className="font-semibold text-zoom-blue hover:underline">
-              Sign In
-            </Link>
+        </>
+      }
+    >
+      {step === "details" ? (
+        <>
+          <h1 className="text-[28px] font-semibold text-zoom-ink">
+            Get started with Zoom
+          </h1>
+          <p className="mt-1 text-sm text-zoom-muted">
+            We&apos;ll email you a code to verify it&apos;s really you.
           </p>
-        </div>
-      </header>
-
-      <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm">
-          {step === "details" ? (
-            <>
-              <h1 className="text-center text-[26px] font-bold text-zoom-ink">
-                Create your account
-              </h1>
-              <p className="mt-1 text-center text-sm text-zoom-muted">
-                We&apos;ll email you a code to verify it&apos;s really you.
-              </p>
               <form onSubmit={requestOtp} className="mt-8 space-y-4">
                 <div>
                   <label className="label" htmlFor="name">
@@ -224,8 +217,6 @@ export default function SignupPage() {
               </div>
             </>
           )}
-        </div>
-      </main>
-    </div>
+    </AuthShell>
   );
 }

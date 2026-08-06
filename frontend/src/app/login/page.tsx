@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ZoomLogo } from "@/components/ZoomLogo";
+import { AuthShell } from "@/components/AuthShell";
 import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
@@ -64,31 +64,22 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-white">
-      <header className="border-b border-zoom-line">
-        <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between px-6">
-          <Link href="/login">
-            <ZoomLogo />
+    <AuthShell
+      headerRight={
+        <>
+          New to Zoom?{" "}
+          <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
+            Sign Up Free
           </Link>
-          <p className="text-sm text-zoom-muted">
-            New here?{" "}
-            <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
-              Sign Up Free
-            </Link>
-          </p>
-        </div>
-      </header>
+        </>
+      }
+    >
+      <h1 className="text-[28px] font-semibold text-zoom-ink">Sign in</h1>
+      <p className="mt-1 text-sm text-zoom-muted">
+        Welcome back — sign in to start meeting.
+      </p>
 
-      <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm">
-          <h1 className="text-center text-[26px] font-bold text-zoom-ink">
-            Sign In
-          </h1>
-          <p className="mt-1 text-center text-sm text-zoom-muted">
-            Welcome back — sign in to start meeting.
-          </p>
-
-          <form onSubmit={submit} className="mt-8 space-y-4">
+      <form onSubmit={submit} className="mt-8 space-y-4">
             <div>
               <label className="label" htmlFor="email">
                 Email address
@@ -165,14 +156,12 @@ export default function LoginPage() {
             </div>
           )}
 
-          <p className="mt-6 text-center text-sm text-zoom-muted">
-            Don&apos;t have an account?{" "}
-            <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
-              Sign up
-            </Link>
-          </p>
-        </div>
-      </main>
-    </div>
+      <p className="mt-6 text-center text-sm text-zoom-muted">
+        Don&apos;t have an account?{" "}
+        <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
+          Sign up
+        </Link>
+      </p>
+    </AuthShell>
   );
 }
