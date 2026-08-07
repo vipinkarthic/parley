@@ -26,9 +26,6 @@ on the frontend - the API client uses the native `fetch`).
 ---
 
 ## Features
-
-### Core (required)
-
 - **Landing dashboard** - Zoom-style UI with a working navbar (Home / Meetings /
   Contacts / Whiteboards, search, settings, profile menu), quick-action tiles
   (New Meeting / Join / Schedule) and **Upcoming** + **Recent** meeting lists.
@@ -39,9 +36,6 @@ on the frontend - the API client uses the native `fetch`).
   with a clear "meeting not found" state otherwise.
 - **Schedule meeting** - topic, description, date/time and duration. Stored in
   the DB, given a unique link, and listed under **Upcoming**.
-
-### Bonus (good-to-have)
-
 - **Authentication** - email/password **login** and **OTP-verified signup**
   (a real 6-digit code is emailed via Gmail SMTP, with a dev fallback). Sessions
   are stateless **JWT Bearer** tokens; meetings are scoped to the signed-in user.
@@ -66,12 +60,6 @@ on the frontend - the API client uses the native `fetch`).
 - **Profile & settings** - edit display name, avatar color and photo, a Personal
   Meeting ID (permanent room), change password, and preferences that drive the
   pre-join defaults (join muted, video-on-join, mirror, HD).
-
-### Coming soon (stubbed in the UI, labelled "Soon")
-
-- **Contacts** - a team directory with presence and one-click calling.
-- **Whiteboards** - a collaborative canvas.
-- **TURN server** for calls across strict/enterprise NATs (STUN only today).
 
 ---
 
