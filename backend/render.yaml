@@ -1,14 +1,24 @@
 # Render.com blueprint for the FastAPI backend.
-# Deploy: New + > Blueprint, point at this repo, set root to `backend`.
+# Deploy: New + -> Blueprint, point at this repo (Render reads this file).
 services:
   - type: web
     name: zoom-clone-api
     runtime: python
     rootDir: backend
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: JWT_SECRET
+        generateValue: true          # Render generates a strong random secret
       - key: FRONTEND_URL
-        sync: false # set to your deployed frontend URL
+        sync: false                  # set to your Vercel URL (e.g. https://your-app.vercel.app)
       - key: CORS_ORIGINS
-        sync: false # e.g. https://your-app.vercel.app
+        sync: false                  # your Vercel URL; *.vercel.app is also allowed automatically
+      - key: SMTP_PASS
+        sync: false                  # optional: Gmail App Password for real OTP email (blank = dev-mode OTP)
+      - key: SEED_SAMPLE_DATA
+        value: "false"               # demo accounts always seed; set true to also seed sample meetings
