@@ -117,10 +117,6 @@ export const api = {
     }),
   startPersonalRoom: () =>
     request<Meeting>("/api/meetings/personal", { method: "POST" }),
-  demoAccounts: () =>
-    request<{ name: string; email: string; password: string }[]>(
-      "/auth/demo-accounts"
-    ),
 
   contacts: () => request<Contact[]>("/api/contacts"),
   preferences: () => request<Preferences>("/api/preferences"),

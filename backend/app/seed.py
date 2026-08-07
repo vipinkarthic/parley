@@ -10,8 +10,6 @@ from sqlalchemy.orm import Session
 
 from . import models, utils
 from .config import SEED_SAMPLE_DATA
-from .demo_accounts import DEMO_ACCOUNTS, DEMO_PASSWORD
-from .security import hash_password
 
 
 def _make_meeting(db: Session, **kwargs) -> models.Meeting:
@@ -26,40 +24,14 @@ def _make_meeting(db: Session, **kwargs) -> models.Meeting:
     return m
 
 
-def seed_demo_accounts(db: Session) -> models.User:
-    """Always ensure the demo accounts exist (for quick login/testing).
-    Returns the first demo account."""
-    first: models.User | None = None
-    for acc in DEMO_ACCOUNTS:
-        user = (
-            db.query(models.User)
-            .filter(models.User.email == acc["email"])
-            .first()
-        )
-        if user is None:
-            user = models.User(
-                name=acc["name"],
-                email=acc["email"],
-                password_hash=hash_password(DEMO_PASSWORD),
-                is_verified=True,
-                avatar_color=acc["color"],
-                pmi=utils.generate_meeting_number(db),
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-        if first is None:
-            first = user
-    return first  # type: ignore[return-value]
-
-
 def seed_database(db: Session) -> None:
-    user = seed_demo_accounts(db)
-
     if not SEED_SAMPLE_DATA:
         return
 
     if db.query(models.Meeting).count() > 0:
+        return
+    user = db.query(models.User).order_by(models.User.id.asc()).first()
+    if user is None:
         return
 
     now = datetime.now()

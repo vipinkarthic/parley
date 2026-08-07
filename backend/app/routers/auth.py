@@ -159,13 +159,3 @@ def change_password(
         )
     crud.change_password(db, user, hash_password(data.new_password))
     return {"ok": True}
-
-
-@router.get("/demo-accounts")
-def demo_accounts():
-    from ..demo_accounts import DEMO_ACCOUNTS, DEMO_PASSWORD
-
-    return [
-        {"name": a["name"], "email": a["email"], "password": DEMO_PASSWORD}
-        for a in DEMO_ACCOUNTS
-    ]

@@ -4,15 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
-import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/lib/auth";
-import { api, ApiError } from "@/lib/api";
-
-interface DemoAccount {
-  name: string;
-  email: string;
-  password: string;
-}
+import { ApiError } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,30 +15,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [demos, setDemos] = useState<DemoAccount[]>([]);
 
   useEffect(() => {
     if (!loading && user) router.replace("/");
   }, [loading, user, router]);
-
-  useEffect(() => {
-    api.demoAccounts().then(setDemos).catch(() => {});
-  }, []);
-
-  const loginWith = async (acc: DemoAccount) => {
-    if (submitting) return;
-    setEmail(acc.email);
-    setPassword(acc.password);
-    setSubmitting(true);
-    setError(null);
-    try {
-      await login(acc.email, acc.password);
-      router.replace("/");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Login failed.");
-      setSubmitting(false);
-    }
-  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,41 +93,6 @@ export default function LoginPage() {
               {submitting ? "Signing in..." : "Sign In"}
             </button>
           </form>
-
-          {demos.length > 0 && (
-            <div className="mt-6 rounded-xl border border-dashed border-zoom-line bg-zoom-field/60 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zoom-muted">
-                Demo accounts · one-click login
-              </p>
-              <div className="space-y-1.5">
-                {demos.map((acc) => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    onClick={() => loginWith(acc)}
-                    disabled={submitting}
-                    className="flex w-full items-center gap-2.5 rounded-lg bg-white px-2.5 py-2 text-left ring-1 ring-zoom-line transition-colors hover:bg-[#F0F5FF] disabled:opacity-60"
-                  >
-                    <Avatar name={acc.name} size={30} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-zoom-ink">
-                        {acc.name}
-                      </span>
-                      <span className="block truncate text-xs text-zoom-muted">
-                        {acc.email}
-                      </span>
-                    </span>
-                    <span className="text-xs font-semibold text-zoom-blue">
-                      Log in →
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <p className="mt-2 text-center text-[11px] text-zoom-subtle">
-                Password for all: <span className="font-mono">{demos[0]?.password}</span>
-              </p>
-            </div>
-          )}
 
       <p className="mt-6 text-center text-sm text-zoom-muted">
         Don&apos;t have an account?{" "}
