@@ -1,7 +1,7 @@
-"""Seed the database with a default user and sample meetings.
+"""Seed the database with demo accounts (and optional sample meetings).
 
-Idempotent: only seeds when the meetings table is empty, so restarting the
-server does not create duplicates.
+Idempotent: demo accounts are created only if missing, and sample meetings are
+seeded once, so restarting the server never duplicates anything.
 """
 import uuid
 from datetime import datetime, timedelta
@@ -10,6 +10,38 @@ from sqlalchemy.orm import Session
 
 from . import models, utils
 from .config import SEED_SAMPLE_DATA
+from .security import hash_password
+
+# Ready-to-use demo logins so the app can be tested without going through the
+# email OTP flow. All share the same password.
+DEMO_PASSWORD = "demo1234"
+DEMO_ACCOUNTS = [
+    {"name": "Vipin Karthic", "email": "vipin@demo.dev", "color": "#0B5CFF"},
+    {"name": "Demo1", "email": "demo1@demo.dev", "color": "#12B76A"},
+    {"name": "Demo2", "email": "demo2@demo.dev", "color": "#F79009"},
+]
+
+
+def seed_demo_accounts(db: Session) -> None:
+    """Create the demo accounts if they don't already exist (verified, so they
+    can log in straight away)."""
+    for acc in DEMO_ACCOUNTS:
+        exists = (
+            db.query(models.User).filter(models.User.email == acc["email"]).first()
+        )
+        if exists:
+            continue
+        db.add(
+            models.User(
+                name=acc["name"],
+                email=acc["email"],
+                password_hash=hash_password(DEMO_PASSWORD),
+                is_verified=True,
+                avatar_color=acc["color"],
+                pmi=utils.generate_meeting_number(db),
+            )
+        )
+    db.commit()
 
 
 def _make_meeting(db: Session, **kwargs) -> models.Meeting:
@@ -25,6 +57,10 @@ def _make_meeting(db: Session, **kwargs) -> models.Meeting:
 
 
 def seed_database(db: Session) -> None:
+    seed_demo_accounts(db)
+
+    # Sample meetings are opt-in (SEED_SAMPLE_DATA=true), hosted by the first
+    # demo account.
     if not SEED_SAMPLE_DATA:
         return
 

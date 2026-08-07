@@ -214,9 +214,21 @@ cp .env.example .env          # works as-is for local dev (dev-mode OTP)
 uvicorn app.main:app --reload --port 8000
 ```
 
-The SQLite file (`zoomclone.db`) is created on first run and starts **empty** -
-there are no seeded accounts, you create your own via signup. API runs at
+The SQLite file (`zoomclone.db`) is created on first run. API runs at
 `http://localhost:8000` (interactive docs at `/docs`).
+
+**Seeded demo accounts** are created automatically on startup so you can log in
+right away (no OTP needed) - all share the password **`demo1234`**:
+
+| Name          | Email            | Password   |
+| ------------- | ---------------- | ---------- |
+| Vipin Karthic | `vipin@demo.dev` | `demo1234` |
+| Demo1         | `demo1@demo.dev` | `demo1234` |
+| Demo2         | `demo2@demo.dev` | `demo1234` |
+
+Log into two of them in separate windows to test a real multi-peer meeting. You
+can also create your own account via signup. (Set `SEED_SAMPLE_DATA=true` to also
+seed a few sample meetings hosted by the first demo account.)
 
 > **Dev-mode OTP (default):** with no `SMTP_PASS` set, the signup code is shown
 > in the signup UI and printed to the backend console - no email setup needed.
