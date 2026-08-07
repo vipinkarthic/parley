@@ -88,7 +88,7 @@ scaler-task/
 │   │       ├── meetings.py       # Meeting + participant + join endpoints
 │   │       └── users.py          # Contacts, profile, preferences
 │   ├── requirements.txt
-│   ├── Procfile / render.yaml    # Deploy configs (Render / Railway)
+│   ├── Procfile                  # Backend start command (Render / Railway)
 │   └── .env.example
 │
 ├── frontend/                     # Next.js app (App Router)
@@ -110,6 +110,7 @@ scaler-task/
 │           └── useMeeting.ts             # WebRTC mesh + signalling hook
 │
 ├── docs/screenshots/             # README images
+├── render.yaml                   # Render blueprint (builds from backend/)
 └── README.md
 ```
 
