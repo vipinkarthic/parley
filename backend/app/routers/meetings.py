@@ -217,10 +217,14 @@ def join_meeting(
     if is_owner and meeting.status == "scheduled":
         meeting.status = "active"
         db.commit()
+    # tag anyone joining without an account so everyone can see they're a guest
+    display_name = data.display_name.strip()
+    if user is None and not display_name.lower().endswith("(guest)"):
+        display_name = f"{display_name} (Guest)"
     participant = crud.add_participant(
         db,
         meeting,
-        data.display_name,
+        display_name,
         is_host=is_host,
         user_id=user.id if user else None,
         admission=admission,

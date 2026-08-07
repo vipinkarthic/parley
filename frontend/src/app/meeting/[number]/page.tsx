@@ -114,7 +114,7 @@ export default function MeetingRoomPage() {
       const passcode = meeting?.passcode || pwd || o.passcode;
       const join = await api.join(number, o.name, passcode);
       streamRef.current = o.stream;
-      setJoined({ join, name: o.name, stream: o.stream, micOn: o.micOn, camOn: o.camOn });
+      setJoined({ join, name: join.display_name, stream: o.stream, micOn: o.micOn, camOn: o.camOn });
       setPhase("in");
     } catch (err) {
       if (err instanceof ApiError && err.status === 425) {
