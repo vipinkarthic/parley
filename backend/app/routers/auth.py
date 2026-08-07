@@ -1,11 +1,11 @@
 """Authentication: email/password login + OTP-verified signup."""
-import random
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .. import config, crud, models, schemas
+from .. import config, crud, models, ratelimit, schemas
 from ..database import get_db
 from ..deps import get_current_user
 from ..emailer import EmailSendError, send_otp_email
@@ -18,9 +18,20 @@ from ..security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_LOGIN_LIMIT, _LOGIN_WINDOW = 10, 300
+_OTP_LIMIT, _OTP_WINDOW = 5, 600
+
 
 def _new_otp() -> str:
-    return f"{random.randint(0, 999999):06d}"
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _rate_limit(kind: str, email: str, limit: int, window: int) -> None:
+    if not ratelimit.allow(f"{kind}:{email.strip().lower()}", limit, window):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Please wait a bit and try again.",
+        )
 
 
 def _dispatch_otp(email: str, code: str) -> bool:
@@ -35,6 +46,7 @@ def _dispatch_otp(email: str, code: str) -> bool:
 
 @router.post("/signup/request-otp", response_model=schemas.OtpRequestResponse)
 def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db)):
+    _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     if crud.get_user_by_email(db, data.email):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,6 +72,7 @@ def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db
 
 @router.post("/signup/resend-otp", response_model=schemas.OtpRequestResponse)
 def resend_signup_otp(data: schemas.ResendOtpRequest, db: Session = Depends(get_db)):
+    _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
         raise HTTPException(
@@ -131,6 +144,7 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
 
 @router.post("/login", response_model=schemas.AuthResponse)
 def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
+    _rate_limit("login", data.email, _LOGIN_LIMIT, _LOGIN_WINDOW)
     user = crud.get_user_by_email(db, data.email)
     if user is None or not verify_password(data.password, user.password_hash):
         raise HTTPException(

@@ -22,9 +22,17 @@ CORS_ORIGINS = [
     if origin.strip()
 ]
 
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me-in-production")
+_DEFAULT_JWT_SECRET = "dev-secret-change-me-in-production"
+JWT_SECRET = os.getenv("JWT_SECRET", _DEFAULT_JWT_SECRET)
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))
+
+if JWT_SECRET == _DEFAULT_JWT_SECRET:
+    import logging
+    logging.getLogger("zoomclone").warning(
+        "JWT_SECRET is the built-in default - set a strong JWT_SECRET env var in "
+        "production or tokens can be forged."
+    )
 
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))

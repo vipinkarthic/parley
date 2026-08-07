@@ -23,6 +23,9 @@ def meeting_out(
         duration=meeting.duration,
         created_at=meeting.created_at,
         host=schemas.UserOut.model_validate(meeting.host),
-        invite_link=utils.build_invite_link(meeting.meeting_number, meeting.passcode),
+        # only the host gets the passcode in the link, else any guest hitting this endpoint could just read it out
+        invite_link=utils.build_invite_link(
+            meeting.meeting_number, meeting.passcode if is_host_viewer else None
+        ),
         participant_count=crud.active_participant_count(db, meeting),
     )

@@ -154,15 +154,6 @@ def update_meeting_settings(
     return meeting_out(db, updated, user.id)
 
 
-@router.get(
-    "/meetings/{meeting_number}/participants",
-    response_model=list[schemas.ParticipantOut],
-)
-def get_participants(meeting_number: str, db: Session = Depends(get_db)):
-    meeting = _require_meeting(db, meeting_number)
-    return crud.list_participants(db, meeting)
-
-
 @router.post(
     "/meetings/{meeting_number}/join",
     response_model=schemas.ParticipantJoinOut,
@@ -249,44 +240,3 @@ def join_meeting(
         is_meeting_host=is_owner,
         admission=participant.admission,
     )
-
-
-@router.post(
-    "/meetings/{meeting_number}/participants/{participant_id}/mute",
-    response_model=schemas.ParticipantOut,
-)
-def mute_participant(
-    meeting_number: str,
-    participant_id: int,
-    muted: bool = True,
-    db: Session = Depends(get_db),
-):
-    meeting = _require_meeting(db, meeting_number)
-    participant = crud.get_participant(db, meeting, participant_id)
-    if participant is None:
-        raise HTTPException(status_code=404, detail="Participant not found.")
-    return crud.set_participant_muted(db, participant, muted)
-
-
-@router.post("/meetings/{meeting_number}/mute-all")
-def mute_all(meeting_number: str, db: Session = Depends(get_db)):
-    """Host control: mute everyone except the host."""
-    meeting = _require_meeting(db, meeting_number)
-    muted = crud.mute_all_except_host(db, meeting)
-    return {"muted": muted}
-
-
-@router.delete(
-    "/meetings/{meeting_number}/participants/{participant_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def remove_participant(
-    meeting_number: str, participant_id: int, db: Session = Depends(get_db)
-):
-    """Host control: remove a participant from the meeting."""
-    meeting = _require_meeting(db, meeting_number)
-    participant = crud.get_participant(db, meeting, participant_id)
-    if participant is None:
-        raise HTTPException(status_code=404, detail="Participant not found.")
-    crud.remove_participant(db, participant)
-    return None

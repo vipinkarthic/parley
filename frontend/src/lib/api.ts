@@ -3,7 +3,6 @@ import type {
   JoinResult,
   Meeting,
   MeetingSettings,
-  Participant,
   Preferences,
   User,
 } from "./types";
@@ -170,33 +169,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ display_name: displayName, passcode: passcode ?? null }),
     }),
-
-  participants: (number: string) =>
-    request<Participant[]>(
-      `/api/meetings/${encodeURIComponent(number)}/participants`
-    ),
-
-  muteParticipant: (number: string, participantId: number, muted: boolean) =>
-    request<Participant>(
-      `/api/meetings/${encodeURIComponent(
-        number
-      )}/participants/${participantId}/mute?muted=${muted}`,
-      { method: "POST" }
-    ),
-
-  muteAll: (number: string) =>
-    request<{ muted: number }>(
-      `/api/meetings/${encodeURIComponent(number)}/mute-all`,
-      { method: "POST" }
-    ),
-
-  removeParticipant: (number: string, participantId: number) =>
-    request<void>(
-      `/api/meetings/${encodeURIComponent(
-        number
-      )}/participants/${participantId}`,
-      { method: "DELETE" }
-    ),
 
   endMeeting: (number: string) =>
     request<Meeting>(`/api/meetings/${encodeURIComponent(number)}/end`, {
