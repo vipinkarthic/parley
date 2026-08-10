@@ -11,7 +11,7 @@ const BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||
   "http://localhost:8000";
 
-const TOKEN_KEY = "zc_token";
+const TOKEN_KEY = "parley_token";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
