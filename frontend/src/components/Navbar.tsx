@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { Avatar } from "./Avatar";
-import { ZoomLogo } from "./ZoomLogo";
+import { ParleyLogo } from "./ParleyLogo";
 import { ChevronDownIcon, SearchIcon, SettingsIcon } from "./Icons";
 import { SoonBadge } from "./SoonBadge";
 
@@ -42,11 +42,11 @@ export function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-zoom-line bg-white/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-parley-line bg-white/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-8">
           <Link href="/" aria-label="Home">
-            <ZoomLogo />
+            <ParleyLogo />
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
             {NAV_LINKS.map((link) => (
@@ -55,8 +55,8 @@ export function Navbar() {
                 href={link.href}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-[15px] transition-colors ${
                   isActive(link.href)
-                    ? "font-semibold text-zoom-ink"
-                    : "text-zoom-muted hover:text-zoom-ink"
+                    ? "font-semibold text-parley-ink"
+                    : "text-parley-muted hover:text-parley-ink"
                 }`}
               >
                 {link.label}
@@ -70,14 +70,14 @@ export function Navbar() {
           <Link
             href="/meetings"
             aria-label="Search"
-            className="grid h-9 w-9 place-items-center rounded-full text-zoom-muted transition-colors hover:bg-black/5"
+            className="grid h-9 w-9 place-items-center rounded-full text-parley-muted transition-colors hover:bg-black/5"
           >
             <SearchIcon className="h-5 w-5" />
           </Link>
           <Link
             href="/settings"
             aria-label="Settings"
-            className="grid h-9 w-9 place-items-center rounded-full text-zoom-muted transition-colors hover:bg-black/5"
+            className="grid h-9 w-9 place-items-center rounded-full text-parley-muted transition-colors hover:bg-black/5"
           >
             <SettingsIcon className="h-5 w-5" />
           </Link>
@@ -93,26 +93,26 @@ export function Navbar() {
                 src={user?.avatar_url}
                 size={32}
               />
-              <span className="hidden text-sm font-medium text-zoom-ink sm:block">
+              <span className="hidden text-sm font-medium text-parley-ink sm:block">
                 {user?.name || "You"}
               </span>
-              <ChevronDownIcon className="hidden h-4 w-4 text-zoom-muted sm:block" />
+              <ChevronDownIcon className="hidden h-4 w-4 text-parley-muted sm:block" />
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-12 w-56 overflow-hidden rounded-xl border border-zoom-line bg-white py-1 shadow-modal animate-scale-in">
-                <div className="border-b border-zoom-line px-4 py-3">
-                  <p className="truncate text-sm font-semibold text-zoom-ink">
+              <div className="absolute right-0 top-12 w-56 overflow-hidden rounded-xl border border-parley-line bg-white py-1 shadow-modal animate-scale-in">
+                <div className="border-b border-parley-line px-4 py-3">
+                  <p className="truncate text-sm font-semibold text-parley-ink">
                     {user?.name}
                   </p>
-                  <p className="truncate text-xs text-zoom-muted">
+                  <p className="truncate text-xs text-parley-muted">
                     {user?.email}
                   </p>
                 </div>
                 <Link
                   href="/settings"
                   onClick={() => setMenuOpen(false)}
-                  className="block px-4 py-2.5 text-sm text-zoom-ink hover:bg-zoom-field"
+                  className="block px-4 py-2.5 text-sm text-parley-ink hover:bg-parley-field"
                 >
                   Settings
                 </Link>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ZoomLogo } from "./ZoomLogo";
+import { ParleyLogo } from "./ParleyLogo";
 import { CheckIcon } from "./Icons";
 
 export function AuthShell({
@@ -12,12 +12,12 @@ export function AuthShell({
 }) {
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="border-b border-zoom-line">
+      <header className="border-b border-parley-line">
         <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between px-4 sm:px-6">
           <Link href="/login" aria-label="Home">
-            <ZoomLogo />
+            <ParleyLogo />
           </Link>
-          <div className="text-sm text-zoom-muted">{headerRight}</div>
+          <div className="text-sm text-parley-muted">{headerRight}</div>
         </div>
       </header>
 
@@ -40,7 +40,7 @@ const FEATURES = [
 
 function BrandPanel() {
   return (
-    <div className="relative hidden overflow-hidden bg-gradient-to-br from-zoom-blue to-[#0A3AA8] lg:flex lg:flex-col lg:items-center lg:justify-center lg:px-12">
+    <div className="relative hidden overflow-hidden bg-gradient-to-br from-parley-brand to-[#0A4F4A] lg:flex lg:flex-col lg:items-center lg:justify-center lg:px-12">
       <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-28 -left-16 h-80 w-80 rounded-full bg-white/10 blur-2xl" />
 
@@ -71,7 +71,7 @@ function BrandPanel() {
 }
 
 const TILES: [string, string][] = [
-  ["#FF7A59", "AR"],
+  ["#E8833A", "AR"],
   ["#12B76A", "MJ"],
   ["#7A5AF8", "KP"],
   ["#F79009", "LS"],
