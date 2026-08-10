@@ -1,4 +1,4 @@
-"""Helpers for generating Zoom-style meeting numbers, passcodes, and links."""
+"""Helpers for generating meeting numbers, passcodes, and invite links."""
 import secrets
 import string
 
@@ -28,7 +28,7 @@ def generate_meeting_number(db: Session) -> str:
 
 
 def generate_passcode(length: int = 6) -> str:
-    """Return an alphanumeric passcode, like Zoom's join passcode."""
+    """Return a short alphanumeric passcode for joining a meeting."""
     alphabet = string.ascii_lowercase + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
@@ -41,7 +41,7 @@ def format_meeting_number(number: str) -> str:
 
 
 def build_invite_link(meeting_number: str, passcode: str | None = None) -> str:
-    """Invite link with the passcode embedded (like Zoom's ?pwd=), so link
+    """Invite link with the passcode embedded in the query string, so link
     recipients don't have to type it while ID-only joiners still must."""
     link = f"{FRONTEND_URL}/j/{meeting_number}"
     if passcode:

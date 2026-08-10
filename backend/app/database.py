@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DB_PATH = Path(__file__).resolve().parent.parent / "zoomclone.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "parley.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(

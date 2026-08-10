@@ -9,7 +9,7 @@ from . import models, schemas, utils
 
 
 _AVATAR_COLORS = [
-    "#0B5CFF", "#FF7A59", "#12B76A", "#7A5AF8",
+    "#0E7C74", "#E8833A", "#12B76A", "#7A5AF8",
     "#F79009", "#EF4444", "#06AED4", "#EC4899",
 ]
 

@@ -11,7 +11,7 @@ from email.message import EmailMessage
 
 from . import config
 
-logger = logging.getLogger("zoomclone.email")
+logger = logging.getLogger("parley.email")
 
 
 class EmailSendError(Exception):
@@ -20,26 +20,26 @@ class EmailSendError(Exception):
 
 def _build_message(to_email: str, code: str) -> EmailMessage:
     msg = EmailMessage()
-    msg["Subject"] = f"{code} is your Zoom Clone verification code"
+    msg["Subject"] = f"{code} is your Parley verification code"
     msg["From"] = f"{config.SMTP_FROM_NAME} <{config.SMTP_USER}>"
     msg["To"] = to_email
     msg.set_content(
-        f"Your Zoom Clone verification code is: {code}\n\n"
+        f"Your Parley verification code is: {code}\n\n"
         f"It expires in {config.OTP_TTL_MINUTES} minutes. "
         f"If you didn't request this, you can ignore this email."
     )
     msg.add_alternative(
         f"""
         <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-          <h2 style="color:#232333;margin:0 0 8px">Verify your email</h2>
-          <p style="color:#666484;margin:0 0 24px">
-            Enter this code to finish creating your Zoom Clone account.
+          <h2 style="color:#1C2624;margin:0 0 8px">Verify your email</h2>
+          <p style="color:#5A6866;margin:0 0 24px">
+            Enter this code to finish creating your Parley account.
           </p>
-          <div style="font-size:34px;font-weight:700;letter-spacing:8px;color:#0B5CFF;
-                      background:#EEF3FF;border-radius:12px;padding:18px;text-align:center">
+          <div style="font-size:34px;font-weight:700;letter-spacing:8px;color:#0E7C74;
+                      background:#E6F4F2;border-radius:12px;padding:18px;text-align:center">
             {code}
           </div>
-          <p style="color:#8B8B9A;font-size:13px;margin:24px 0 0">
+          <p style="color:#8A9694;font-size:13px;margin:24px 0 0">
             This code expires in {config.OTP_TTL_MINUTES} minutes.
           </p>
         </div>

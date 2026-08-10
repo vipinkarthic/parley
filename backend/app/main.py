@@ -1,4 +1,4 @@
-"""FastAPI application entrypoint for the Zoom Clone backend."""
+"""FastAPI application entrypoint for the Parley backend."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,8 +23,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Zoom Clone API",
-    description="Backend for a Zoom-style video conferencing platform.",
+    title="Parley API",
+    description="Backend for Parley: meetings, auth, and the WebRTC signalling hub.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -46,4 +46,4 @@ app.include_router(ws_router)
 
 @app.get("/", tags=["health"])
 def health():
-    return {"status": "ok", "service": "zoom-clone-api"}
+    return {"status": "ok", "service": "parley-api"}

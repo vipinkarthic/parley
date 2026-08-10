@@ -16,9 +16,9 @@ from .security import hash_password
 # email OTP flow. All share the same password.
 DEMO_PASSWORD = "demo1234"
 DEMO_ACCOUNTS = [
-    {"name": "Vipin Karthic", "email": "vipin@demo.dev", "color": "#0B5CFF"},
-    {"name": "Demo1", "email": "demo1@demo.dev", "color": "#12B76A"},
-    {"name": "Demo2", "email": "demo2@demo.dev", "color": "#F79009"},
+    {"name": "Demo One", "email": "demo1@parley.app", "color": "#0E7C74"},
+    {"name": "Demo Two", "email": "demo2@parley.app", "color": "#12B76A"},
+    {"name": "Demo Three", "email": "demo3@parley.app", "color": "#E8833A"},
 ]
 
 

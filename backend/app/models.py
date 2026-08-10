@@ -2,10 +2,10 @@
 
 Schema design
 -------------
-users          - application accounts. A single default user is seeded because
-                 the assignment assumes "a default user is logged in".
+users          - application accounts, created through signup and verified by
+                 an emailed OTP before they can log in.
 meetings       - every meeting (instant or scheduled) with a unique 11-digit
-                 Zoom-style meeting number, host relationship, and status.
+                 meeting number, host relationship, and status.
 participants   - join records for a meeting; drives the participants panel and
                  host controls (mute / remove).
 
@@ -40,7 +40,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=True)
-    avatar_color: Mapped[str] = mapped_column(String(9), default="#0B5CFF")
+    avatar_color: Mapped[str] = mapped_column(String(9), default="#0E7C74")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pmi: Mapped[str] = mapped_column(String(11), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
