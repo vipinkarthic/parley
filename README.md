@@ -1,9 +1,10 @@
-# Zoom Clone - Video Conferencing Platform
+# Parley
 
-A functional clone of the Zoom web app that mirrors Zoom's look, feel and core
-meeting workflows. You can start instant meetings, schedule meetings for later,
-join by Meeting ID or invite link, and run a live meeting room with camera, mic,
-chat, reactions, screen share, a waiting room and full host controls.
+A video meeting product. Start an instant meeting, schedule one for later, join
+by meeting ID or invite link, and run a live room with camera, mic, chat,
+reactions, screen share, a waiting room and full host controls.
+
+Media is peer-to-peer WebRTC; the server only relays signalling and app events.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -26,18 +27,18 @@ on the frontend - the API client uses the native `fetch`).
 ---
 
 ## Features
-- **Landing dashboard** - Zoom-style UI with a working navbar (Home / Meetings /
-  Contacts / Whiteboards, search, settings, profile menu), quick-action tiles
-  (New Meeting / Join / Schedule) and **Upcoming** + **Recent** meeting lists.
-- **Instant meeting** - one click generates a unique 11-digit Meeting ID and a
+- **Dashboard** - navbar (Home / Meetings / Contacts / Whiteboards, search,
+  settings, profile menu), quick-action tiles (New Meeting / Join / Schedule)
+  and **Upcoming** + **Recent** meeting lists.
+- **Instant meeting** - one click generates a unique 11-digit meeting ID and a
   shareable invite link, and drops you into the room as host.
-- **Join meeting** - join by **Meeting ID** *or* by pasting an **invite link**.
+- **Join meeting** - join by **meeting ID** *or* by pasting an **invite link**.
   A pre-join screen (device preview + name) validates the meeting exists first,
   with a clear "meeting not found" state otherwise.
 - **Schedule meeting** - topic, description, date/time and duration. Stored in
   the DB, given a unique link, and listed under **Upcoming**.
 - **Authentication** - email/password **login** and **OTP-verified signup**
-  (a real 6-digit code is emailed via Gmail SMTP, with a dev fallback). Sessions
+  (a real 6-digit code is emailed over SMTP, with a dev fallback). Sessions
   are stateless **JWT Bearer** tokens; meetings are scoped to the signed-in user.
 - **Guest join** - anyone with an invite link can join **without an account**;
   their name is automatically tagged **`(Guest)`** so they're easy to tell apart.
@@ -46,8 +47,8 @@ on the frontend - the API client uses the native `fetch`).
   tabs/devices actually see and hear each other): live presence, mic/camera
   toggles, real-time chat, reactions and raise-hand, speaker/gallery views with
   pin, active-speaker highlight, in-meeting rename, and a meeting timer.
-- **Faithful screen share** - the sharer keeps broadcasting their camera *and*
-  the screen; everyone sees the screen large with a camera filmstrip on the side.
+- **Screen share** - the sharer keeps broadcasting their camera *and* the
+  screen; everyone sees the screen large with a camera filmstrip on the side.
 - **Full host controls / Security menu** (at creation and live in-meeting):
   waiting room, lock meeting, mute-on-entry, join-before-host, and "allow
   participants to" share / unmute / start-video / rename / chat / react; plus
@@ -57,16 +58,76 @@ on the frontend - the API client uses the native `fetch`).
   the host can start early and then admits people from the waiting room.
 - **Passcode-protected joins** - embedded in invite links, required for ID-only
   joins, host bypasses. The passcode is never leaked to non-hosts.
-- **Profile & settings** - edit display name, avatar color and photo, a Personal
+- **Profile & settings** - edit display name, avatar colour and photo, a Personal
   Meeting ID (permanent room), change password, and preferences that drive the
   pre-join defaults (join muted, video-on-join, mirror, HD).
+
+---
+
+## Architecture
+
+Three planes, with different scaling properties. Keeping them separate is what
+makes the system easy to reason about.
+
+```
+   ┌──────────────┐                              ┌──────────────┐
+   │  Browser A   │                              │  Browser B   │
+   └──────┬───────┘                              └──────┬───────┘
+          │  1. HTTPS  (JWT Bearer, stateless)          │
+          ├─────────────────────┐  ┌────────────────────┤
+          │                     ▼  ▼                    │
+          │              ┌────────────────┐             │
+          │              │    FastAPI     │             │
+          │              │  ┌──────────┐  │             │
+          │  2. WSS      │  │ REST API │  │             │
+          ├──────────────┼─▶│ WS  hub  │◀─┼─────────────┤
+          │  (signalling)│  └────┬─────┘  │             │
+          │              └───────┼────────┘             │
+          │                      ▼                      │
+          │                 ┌─────────┐                 │
+          │                 │   DB    │                 │
+          │                 └─────────┘                 │
+          │                                             │
+          └─────────── 3. WebRTC: audio/video ──────────┘
+                   direct, peer-to-peer, never via the server
+```
+
+### Request / signalling flow for a join
+
+1. **`POST /api/meetings/{number}/join`** (guests allowed, so invite links
+   work). The server decides `is_host` and `admission` *from the database* -
+   never from anything the client claims - writes a `participants` row, and
+   returns a participant id plus a per-participant `ws_token`.
+2. **`WS /ws/meetings/{number}?pid=…&token=…`**. The hub re-reads the meeting
+   and participant from the DB and closes with **4003** if the token doesn't
+   match that participant. This is the only thing that grants host powers on
+   the socket, so they can't be spoofed.
+3. **Admitted** peers get a `peers` snapshot and the room gets `peer-joined`.
+   **Waiting** peers are parked in a lobby and hosts receive `waiting-list`.
+4. Peers exchange **`offer` / `answer` / `ice`** messages addressed with a `to`
+   field. The hub relays them verbatim; it never parses or terminates media.
+5. An **`RTCPeerConnection` per pair** carries audio and video directly between
+   browsers. Chat, reactions, raise-hand, screen-share state and every host
+   control ride the same WebSocket.
+
+### Why the planes matter
+
+| Plane | State | Scaling |
+| --- | --- | --- |
+| HTTP / API | Stateless (JWT, no server sessions) | Horizontal for free; the DB connection count is the ceiling |
+| Signalling (WS) | Room membership held in process | One instance. Thousands of near-idle sockets is not a problem; **cross-instance is not supported** |
+| Media (WebRTC mesh) | None - server sees no media | Bounded by *client* upload and CPU, not by the server |
+
+In a mesh each peer encodes and uploads N−1 copies of its own video, so cost
+grows quadratically across the room while the server stays idle. That is the
+real ceiling, and it is a client-side one. See **Known limits**.
 
 ---
 
 ## Project Structure
 
 ```
-scaler-task/
+parley/
 ├── backend/                      # FastAPI + SQLite API
 │   ├── app/
 │   │   ├── main.py               # App entrypoint, CORS, startup
@@ -81,7 +142,7 @@ scaler-task/
 │   │   ├── emailer.py            # OTP email over SMTP (dev fallback)
 │   │   ├── deps.py               # Auth dependencies (get_current_user)
 │   │   ├── utils.py              # Meeting-number / passcode / invite-link generation
-│   │   ├── seed.py               # Optional sample-data seeding
+│   │   ├── seed.py               # Demo accounts + optional sample meetings
 │   │   ├── ws.py                 # WebSocket signalling hub (WebRTC + presence + host controls)
 │   │   └── routers/
 │   │       ├── auth.py           # Signup (OTP), login, change password, current user
@@ -137,7 +198,7 @@ users 1 ── * meetings 1 ── * participants
 | `email`               | str(200)    | unique                                            |
 | `password_hash`       | str(200)    | bcrypt                                            |
 | `is_verified`         | bool        | set once the email OTP is confirmed               |
-| `avatar_color`        | str(9)      | hex color for the initials avatar                 |
+| `avatar_color`        | str(9)      | hex colour for the initials avatar                |
 | `avatar_url`          | text, null  | uploaded profile photo (data-URL), optional       |
 | `pmi`                 | str(11)     | Personal Meeting ID - the user's permanent room   |
 | `created_at`          | datetime    |                                                   |
@@ -152,7 +213,7 @@ users 1 ── * meetings 1 ── * participants
 | Column               | Type       | Notes                                              |
 | -------------------- | ---------- | -------------------------------------------------- |
 | `id`                 | str(36) PK | uuid4 hex                                          |
-| `meeting_number`     | str(11)    | unique, indexed - the 11-digit Zoom-style ID       |
+| `meeting_number`     | str(11)    | unique, indexed - the 11-digit meeting ID          |
 | `topic`              | str(200)   |                                                    |
 | `description`        | text, null |                                                    |
 | `passcode`           | str(10)    | required to join (host bypasses)                   |
@@ -215,25 +276,25 @@ cp .env.example .env          # works as-is for local dev (dev-mode OTP)
 uvicorn app.main:app --reload --port 8000
 ```
 
-The SQLite file (`zoomclone.db`) is created on first run. API runs at
+The SQLite file (`parley.db`) is created on first run. API runs at
 `http://localhost:8000` (interactive docs at `/docs`).
 
 **Seeded demo accounts** are created automatically on startup so you can log in
 right away (no OTP needed) - all share the password **`demo1234`**:
 
-| Name          | Email            | Password   |
-| ------------- | ---------------- | ---------- |
-| Vipin Karthic | `vipin@demo.dev` | `demo1234` |
-| Demo1         | `demo1@demo.dev` | `demo1234` |
-| Demo2         | `demo2@demo.dev` | `demo1234` |
+| Name       | Email              | Password   |
+| ---------- | ------------------ | ---------- |
+| Demo One   | `demo1@parley.app` | `demo1234` |
+| Demo Two   | `demo2@parley.app` | `demo1234` |
+| Demo Three | `demo3@parley.app` | `demo1234` |
 
 Log into two of them in separate windows to test a real multi-peer meeting. You
 can also create your own account via signup. (Set `SEED_SAMPLE_DATA=true` to also
 seed a few sample meetings hosted by the first demo account.)
 
-> **Dev-mode OTP (default):** with no `SMTP_PASS` set, the signup code is shown
-> in the signup UI and printed to the backend console - no email setup needed.
-> See *Authentication & Email* to send real emails.
+> **Dev-mode OTP (default):** with no `SMTP_USER`/`SMTP_PASS` set, the signup
+> code is shown in the signup UI and printed to the backend console - no email
+> setup needed. See *Authentication & Email* to send real emails.
 
 ### 2. Frontend
 
@@ -262,15 +323,20 @@ you're in.
 
 | Variable           | Default                              | Purpose                                          |
 | ------------------ | ------------------------------------ | ------------------------------------------------ |
+| `APP_ENV`          | `development` (`production` if `RENDER` is set) | Production refuses to boot without a real `JWT_SECRET` |
 | `FRONTEND_URL`     | `http://localhost:3000`              | Used to build invite links                       |
 | `CORS_ORIGINS`     | `http://localhost:3000,...`          | Allowed CORS origins                             |
 | `SEED_SAMPLE_DATA` | `false`                              | `true` seeds a few sample meetings for the first user |
-| `JWT_SECRET`       | *(dev default; set in prod)*         | Secret for signing JWTs                          |
+| `JWT_SECRET`       | *(dev default locally; **required** in production)* | Secret for signing JWTs         |
 | `JWT_EXPIRE_HOURS` | `168`                                | Token lifetime (7 days)                          |
-| `SMTP_USER`        | `vipinkarthic17112005@gmail.com`     | Gmail sender for OTP emails                      |
-| `SMTP_PASS`        | *(empty)*                            | Gmail **App Password**; empty = dev mode         |
+| `SMTP_USER`        | *(empty)*                            | Sending mailbox for OTP email                    |
+| `SMTP_PASS`        | *(empty)*                            | SMTP password / Gmail **App Password**           |
+| `SMTP_FROM_NAME`   | `Parley`                             | Display name on OTP emails                       |
 | `SMTP_TIMEOUT`     | `15`                                 | SMTP socket timeout (seconds)                    |
 | `OTP_TTL_MINUTES`  | `10`                                 | OTP validity window                              |
+
+Real email needs **both** `SMTP_USER` and `SMTP_PASS`; with either missing the
+app stays in dev-mode OTP rather than failing at send time.
 
 **Frontend** (`frontend/.env.local`)
 
@@ -286,11 +352,12 @@ you're in.
   6-digit **OTP** before creating the account. Passwords are **bcrypt** hashed;
   sessions are stateless **JWTs** sent as `Authorization: Bearer <token>` (so it
   works across a Vercel/Render cross-domain split without cookies).
-- **Dev mode (default):** no SMTP password set - the OTP is shown in the signup
-  UI and logged to the console. Zero setup.
-- **Real email (Gmail SMTP):** set `SMTP_PASS` in `backend/.env` to a Gmail
-  **App Password** (Google Account -> Security -> 2-Step Verification -> App
-  Passwords, a 16-char code). OTPs are then delivered to the signup email.
+- **Dev mode (default):** no SMTP credentials set - the OTP is shown in the
+  signup UI and logged to the console. Zero setup.
+- **Real email (Gmail SMTP):** set `SMTP_USER` to the sending mailbox and
+  `SMTP_PASS` to a Gmail **App Password** (Google Account -> Security -> 2-Step
+  Verification -> App Passwords, a 16-char code). OTPs are then delivered to the
+  signup email.
 - Login and OTP-request endpoints are **rate-limited** (per email) to slow
   brute-force and email-bombing.
 
@@ -325,44 +392,45 @@ authenticated WebSocket, not REST.
 | `POST`   | `/api/meetings/{number}/end`          | End a meeting (host)                         |
 | `POST`   | `/api/meetings/{number}/join`         | Join (guests allowed; creates a participant) |
 | `GET`    | `/api/contacts`                       | Registered users (for the future directory)  |
-| `PATCH`  | `/api/profile`                        | Update name / avatar color / photo           |
+| `PATCH`  | `/api/profile`                        | Update name / avatar colour / photo          |
 | `GET`    | `/api/preferences`                    | Read saved preferences                       |
 | `PATCH`  | `/api/preferences`                    | Update preferences                           |
 | `WS`     | `/ws/meetings/{number}`               | Signalling + presence/chat/reactions/host controls |
 
 ---
 
-## Real-time Architecture
+## Known limits
 
-Media is peer-to-peer **WebRTC** - each pair of participants connects directly
-with `RTCPeerConnection`. The FastAPI **WebSocket** hub only relays signalling
-(SDP + ICE) and app events (presence, mic/video state, chat, reactions,
-raise-hand, screen-share, and host controls). Host status and admission are
-decided server-side from the DB; every WebSocket action is authenticated by a
-per-participant `ws_token`, so host privileges can't be spoofed from the client.
+Deliberate, and stated rather than papered over.
 
-A **mesh** is ideal for small meetings; a large call would use an SFU. STUN
-(Google) handles most NATs; strict/enterprise or cross-network NATs would also
-need a TURN server (not included).
+- **Room size.** The mesh is the binding constraint: every peer uploads a
+  separate encode of its own video to every other peer, so upstream bandwidth
+  and CPU grow with the square of the room. Small groups are the design target.
+  **The exact ceiling has not been measured yet** - no number is claimed here
+  until it has been.
+- **No TURN server.** Only Google's public STUN is configured. Peers behind
+  symmetric NAT or a restrictive corporate firewall **cannot connect at all**,
+  and will sit on a failed connection rather than degrading. This is a gap, not
+  a trade-off.
+- **Single backend instance.** Room membership for signalling lives in process,
+  so two instances would not see each other's rooms. Intentional at this scale -
+  a meeting is a few hundred messages - but it means the backend does not scale
+  horizontally today.
+- **No WebSocket reconnect.** A dropped socket (laptop sleeping, a redeploy,
+  a network switch) ends that participant's meeting; there is no backoff and
+  resume.
+- **SQLite.** Fine locally. On a container filesystem the database does not
+  survive a redeploy.
+- **Blocking OTP send.** Signup waits on the SMTP round trip, so signup latency
+  is the mail provider's latency, and an SMTP outage fails signup.
+- **Naive local timestamps.** Times are local wall-clock end to end, so a
+  scheduled time displays exactly as picked, but they are not timezone-aware.
+- **Free-tier cold starts.** The hosted backend spins down when idle, so the
+  first request after a quiet period can take 30-60 seconds.
 
 ---
 
-## Deployment
-
-**Frontend -> Vercel:** import the repo, set **Root Directory** to `frontend`,
-add `NEXT_PUBLIC_API_BASE` = your backend URL, deploy.
-
-**Backend -> Render / Railway:** new Web Service, **Root Directory** `backend`,
-build `pip install -r requirements.txt`, start
-`uvicorn app.main:app --host 0.0.0.0 --port $PORT` (a `Procfile` and
-`render.yaml` are included). Set `FRONTEND_URL`, `CORS_ORIGINS`, a strong
-`JWT_SECRET`, and `SMTP_PASS` for real email. The frontend derives the
-signalling URL from `NEXT_PUBLIC_API_BASE` (`https` -> `wss`), so an HTTPS
-backend works out of the box.
-
----
-
-## Assumptions & Notes
+## Design notes
 
 - **Accounts vs guests** - the dashboard, meetings and settings are gated behind
   login. Invite links work for people **without** an account: they join straight
@@ -376,9 +444,20 @@ backend works out of the box.
 - **Security** - all state-changing endpoints require auth; the passcode is never
   leaked to non-hosts (not even via the invite link); OTPs, passcodes and meeting
   numbers use a cryptographic RNG; and auth endpoints are rate-limited.
-- **Times** are local wall-clock end-to-end, so a scheduled time shows exactly as
-  picked. "Upcoming" = scheduled and not ended; "Recent" = ended.
-- **Google OAuth** is intentionally not included - email/password + OTP keeps the
-  system self-contained with no external OAuth credentials.
-- **Original work** - the UI was rebuilt from scratch in Tailwind after studying
-  Zoom's live site; no Zoom code or third-party clone repos were used.
+- **No Google OAuth** - email/password + OTP keeps the system self-contained
+  with no external OAuth credentials.
+
+---
+
+## Deployment
+
+**Frontend -> Vercel:** import the repo, set **Root Directory** to `frontend`,
+add `NEXT_PUBLIC_API_BASE` = your backend URL, deploy.
+
+**Backend -> Render / Railway:** new Web Service, **Root Directory** `backend`,
+build `pip install -r requirements.txt`, start
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT` (a `Procfile` and
+`render.yaml` are included). Set `FRONTEND_URL`, `CORS_ORIGINS`, a strong
+`JWT_SECRET`, and `SMTP_USER` + `SMTP_PASS` for real email. The frontend derives
+the signalling URL from `NEXT_PUBLIC_API_BASE` (`https` -> `wss`), so an HTTPS
+backend works out of the box.
