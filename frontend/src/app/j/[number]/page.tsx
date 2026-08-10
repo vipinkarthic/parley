@@ -14,7 +14,7 @@ export default function JoinRedirect() {
   }, [params.number, search, router]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-zoom-dark text-white">
+    <div className="flex h-screen items-center justify-center bg-parley-dark text-white">
       <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
     </div>
   );

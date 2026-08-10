@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto flex items-center gap-2.5 rounded-xl bg-zoom-ink px-4 py-3 text-sm font-medium text-white shadow-modal animate-scale-in"
+            className="pointer-events-auto flex items-center gap-2.5 rounded-xl bg-parley-ink px-4 py-3 text-sm font-medium text-white shadow-modal animate-scale-in"
           >
             <span
               className={`grid h-5 w-5 place-items-center rounded-full ${
@@ -52,7 +52,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   ? "bg-[#12B76A]"
                   : t.kind === "error"
                   ? "bg-[#EF4444]"
-                  : "bg-zoom-blue"
+                  : "bg-parley-brand"
               }`}
             >
               {t.kind === "error" ? (

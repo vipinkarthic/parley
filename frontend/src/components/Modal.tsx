@@ -42,11 +42,11 @@ export function Modal({
         className={`relative w-full ${width} rounded-2xl bg-white p-6 shadow-modal animate-scale-in`}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-zoom-ink">{title}</h2>
+          <h2 className="text-xl font-semibold text-parley-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-full text-zoom-muted transition-colors hover:bg-black/5"
+            className="grid h-8 w-8 place-items-center rounded-full text-parley-muted transition-colors hover:bg-black/5"
           >
             <CloseIcon className="h-5 w-5" />
           </button>

@@ -12,7 +12,7 @@ import { formatMeetingNumber } from "@/lib/utils";
 import { CopyIcon, VideoIcon } from "@/components/Icons";
 
 const AVATAR_COLORS = [
-  "#0B5CFF", "#FF7A59", "#12B76A", "#7A5AF8",
+  "#0E7C74", "#E8833A", "#12B76A", "#7A5AF8",
   "#F79009", "#EF4444", "#06AED4", "#EC4899",
 ];
 
@@ -53,7 +53,7 @@ function Toggle({ on, disabled, onChange }: { on: boolean; disabled?: boolean; o
     <button
       onClick={onChange}
       disabled={disabled}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? "bg-zoom-blue" : "bg-zoom-line"}`}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? "bg-parley-brand" : "bg-parley-line"}`}
       aria-pressed={on}
     >
       <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
@@ -63,8 +63,8 @@ function Toggle({ on, disabled, onChange }: { on: boolean; disabled?: boolean; o
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-zoom-line">
-      <h2 className="mb-4 text-lg font-semibold text-zoom-ink">{title}</h2>
+    <section className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-parley-line">
+      <h2 className="mb-4 text-lg font-semibold text-parley-ink">{title}</h2>
       {children}
     </section>
   );
@@ -103,13 +103,13 @@ export default function SettingsPage() {
   return (
     <PageShell title="Settings" subtitle="Manage your profile and preferences">
       <div className="grid gap-6 md:grid-cols-[210px_1fr]">
-        <aside className="rounded-2xl bg-white p-2 shadow-card ring-1 ring-zoom-line md:self-start">
+        <aside className="rounded-2xl bg-white p-2 shadow-card ring-1 ring-parley-line md:self-start">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`flex w-full items-center rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
-                tab === t.id ? "bg-zoom-field font-semibold text-zoom-ink" : "text-zoom-muted hover:bg-zoom-field"
+                tab === t.id ? "bg-parley-field font-semibold text-parley-ink" : "text-parley-muted hover:bg-parley-field"
               }`}
             >
               {t.label}
@@ -184,16 +184,16 @@ function PrefsCard({
       {!prefs ? (
         <div className="space-y-3">
           {rows.map((_, i) => (
-            <div key={i} className="h-6 w-full animate-pulse rounded bg-zoom-field" />
+            <div key={i} className="h-6 w-full animate-pulse rounded bg-parley-field" />
           ))}
         </div>
       ) : (
         <div className="-mx-2">
           {rows.map((row) => (
-            <div key={row.key} className="flex items-center justify-between gap-4 rounded-lg px-2 py-3 hover:bg-zoom-field">
+            <div key={row.key} className="flex items-center justify-between gap-4 rounded-lg px-2 py-3 hover:bg-parley-field">
               <div>
-                <p className="text-sm text-zoom-ink">{row.label}</p>
-                <p className="text-xs text-zoom-muted">{row.hint}</p>
+                <p className="text-sm text-parley-ink">{row.label}</p>
+                <p className="text-xs text-parley-muted">{row.hint}</p>
               </div>
               <Toggle on={prefs[row.key]} disabled={saving} onChange={() => onToggle(row.key)} />
             </div>
@@ -285,7 +285,7 @@ function ProfileTab({
                 <button
                   onClick={async () => { if (await patch({ avatar_url: "" })) toast("Photo removed", "success"); }}
                   disabled={busy}
-                  className="btn-ghost text-sm text-zoom-muted"
+                  className="btn-ghost text-sm text-parley-muted"
                 >
                   Remove
                 </button>
@@ -293,7 +293,7 @@ function ProfileTab({
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPhoto} />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-zoom-muted">Colour:</span>
+              <span className="text-xs text-parley-muted">Colour:</span>
               {AVATAR_COLORS.map((c) => (
                 <button
                   key={c}
@@ -301,7 +301,7 @@ function ProfileTab({
                   disabled={busy}
                   aria-label={`Set avatar colour ${c}`}
                   className={`h-5 w-5 rounded-full ring-2 ring-offset-1 transition ${
-                    user.avatar_color === c ? "ring-zoom-ink" : "ring-transparent hover:ring-zoom-line"
+                    user.avatar_color === c ? "ring-parley-ink" : "ring-transparent hover:ring-parley-line"
                   }`}
                   style={{ background: c }}
                 />
@@ -326,15 +326,15 @@ function ProfileTab({
           </div>
           <div>
             <label className="label">Email</label>
-            <input className="input bg-zoom-field text-zoom-muted" value={user.email} readOnly />
+            <input className="input bg-parley-field text-parley-muted" value={user.email} readOnly />
           </div>
         </div>
       </Card>
 
       <Card title="Personal Meeting Room">
-        <p className="text-sm text-zoom-muted">Your permanent meeting ID - reuse it any time.</p>
+        <p className="text-sm text-parley-muted">Your permanent meeting ID - reuse it any time.</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <span className="rounded-lg bg-zoom-field px-3 py-2 font-mono text-lg font-semibold text-zoom-ink">
+          <span className="rounded-lg bg-parley-field px-3 py-2 font-mono text-lg font-semibold text-parley-ink">
             {formatMeetingNumber(user.pmi)}
           </span>
           <button onClick={copyPmi} className="btn-outline !py-2 text-sm">

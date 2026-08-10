@@ -136,14 +136,14 @@ export function ScheduleModal({
               <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />
             </span>
             <div>
-              <p className="font-semibold text-zoom-ink">{created.topic}</p>
-              <p className="text-sm text-zoom-muted">
+              <p className="font-semibold text-parley-ink">{created.topic}</p>
+              <p className="text-sm text-parley-muted">
                 {formatMeetingTime(created.start_time)} · {created.duration} min
               </p>
             </div>
           </div>
 
-          <div className="space-y-3 rounded-xl border border-zoom-line p-4">
+          <div className="space-y-3 rounded-xl border border-parley-line p-4">
             <Row label="Meeting ID">
               {formatMeetingNumber(created.meeting_number)}
             </Row>
@@ -154,7 +154,7 @@ export function ScheduleModal({
                 <input
                   readOnly
                   value={created.invite_link}
-                  className="input flex-1 bg-zoom-field text-sm"
+                  className="input flex-1 bg-parley-field text-sm"
                   onFocus={(e) => e.target.select()}
                 />
                 <button onClick={copyLink} className="btn-outline shrink-0 !px-3">
@@ -188,7 +188,7 @@ export function ScheduleModal({
           </div>
           <div>
             <label className="label" htmlFor="s-desc">
-              Description <span className="text-zoom-subtle">(optional)</span>
+              Description <span className="text-parley-subtle">(optional)</span>
             </label>
             <textarea
               id="s-desc"
@@ -246,8 +246,8 @@ export function ScheduleModal({
             </select>
           </div>
           {!isEdit && (
-            <div className="rounded-xl border border-zoom-line p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zoom-muted">
+            <div className="rounded-xl border border-parley-line p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-parley-muted">
                 Options
               </p>
               <div className="space-y-1">
@@ -259,7 +259,7 @@ export function ScheduleModal({
             </div>
           )}
           <div className="flex items-center justify-between pt-1">
-            <span className="inline-flex items-center gap-1.5 text-xs text-zoom-muted">
+            <span className="inline-flex items-center gap-1.5 text-xs text-parley-muted">
               <CalendarIcon className="h-4 w-4" />
               A unique link is generated automatically.
             </span>
@@ -289,8 +289,8 @@ export function ScheduleModal({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between text-sm">
-      <span className="text-zoom-muted">{label}</span>
-      <span className="font-medium text-zoom-ink">{children}</span>
+      <span className="text-parley-muted">{label}</span>
+      <span className="font-medium text-parley-ink">{children}</span>
     </div>
   );
 }
@@ -305,12 +305,12 @@ function Opt({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm text-zoom-ink hover:bg-zoom-field">
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm text-parley-ink hover:bg-parley-field">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-zoom-blue"
+        className="h-4 w-4 accent-parley-brand"
       />
       {label}
     </label>

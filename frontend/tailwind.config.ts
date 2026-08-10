@@ -9,20 +9,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Zoom brand palette (sampled from zoom.us via Playwright)
-        zoom: {
-          blue: "#0B5CFF",
-          bluehover: "#0A4FE0",
-          link: "#0D6BDE",
-          orange: "#FF7A59",
-          ink: "#232333",
-          muted: "#666484",
-          subtle: "#8B8B9A",
-          line: "#E9E9EE",
-          field: "#F7F7FA",
-          dark: "#1A1A24",
-          darker: "#0E0E14",
-          panel: "#242430",
+        // Parley palette. Teal primary: 5.06:1 on white, so white button
+        // text clears WCAG AA. Neutrals warmed off the old blue-purple cast.
+        parley: {
+          brand: "#0E7C74",
+          brandhover: "#0A625B",
+          accent: "#E8833A", // also the warm entry in the avatar palettes
+          tint: "#E6F4F2",
+          ink: "#1C2624",
+          muted: "#5A6866",
+          subtle: "#8A9694",
+          line: "#E4E9E8",
+          field: "#F5F8F7",
+          dark: "#161D1C",
+          darker: "#0B100F",
+          panel: "#202927",
         },
       },
       fontFamily: {

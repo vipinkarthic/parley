@@ -20,11 +20,11 @@ export function PageShell({
         <main className="mx-auto max-w-[1180px] px-4 pb-16 pt-8 sm:px-6">
           <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-zoom-ink sm:text-[28px]">
+              <h1 className="text-2xl font-bold text-parley-ink sm:text-[28px]">
                 {title}
               </h1>
               {subtitle && (
-                <p className="mt-1 text-[15px] text-zoom-muted">{subtitle}</p>
+                <p className="mt-1 text-[15px] text-parley-muted">{subtitle}</p>
               )}
             </div>
             {action}

@@ -84,11 +84,11 @@ function Dashboard() {
 
       <main className="mx-auto max-w-[1180px] px-4 pb-16 pt-8 sm:px-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-zoom-ink sm:text-[28px]">
+          <h1 className="text-2xl font-bold text-parley-ink sm:text-[28px]">
             {greeting}
             {user ? `, ${user.name.split(" ")[0]}` : ""}
           </h1>
-          <p className="mt-1 text-[15px] text-zoom-muted">
+          <p className="mt-1 text-[15px] text-parley-muted">
             {now
               ? now.toLocaleDateString(undefined, {
                   weekday: "long",
@@ -105,14 +105,14 @@ function Dashboard() {
             icon={<VideoIcon className="h-7 w-7" />}
             label="New Meeting"
             sublabel="Start an instant meeting"
-            color="#FF7A59"
+            color="#E8833A"
             onClick={startInstant}
           />
           <ActionTile
             icon={<PlusIcon className="h-7 w-7" />}
             label="Join"
             sublabel="via Meeting ID or link"
-            color="#0B5CFF"
+            color="#0E7C74"
             onClick={() => setJoinOpen(true)}
           />
           <ActionTile
@@ -165,8 +165,8 @@ function Dashboard() {
       {starting && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 animate-fade-in">
           <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-8 py-7 shadow-modal">
-            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-zoom-line border-t-zoom-blue" />
-            <p className="text-sm font-medium text-zoom-ink">
+            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-parley-line border-t-parley-brand" />
+            <p className="text-sm font-medium text-parley-ink">
               Starting your meeting...
             </p>
           </div>
@@ -194,10 +194,10 @@ function MeetingSection({
   onChanged?: () => void;
 }) {
   return (
-    <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-zoom-line">
+    <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-parley-line">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-zoom-ink">{title}</h2>
-        <span className="rounded-full bg-zoom-field px-2.5 py-0.5 text-xs font-medium text-zoom-muted">
+        <h2 className="text-lg font-semibold text-parley-ink">{title}</h2>
+        <span className="rounded-full bg-parley-field px-2.5 py-0.5 text-xs font-medium text-parley-muted">
           {meetings.length}
         </span>
       </div>
@@ -206,20 +206,20 @@ function MeetingSection({
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center gap-4 px-3 py-3.5">
-              <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-zoom-field" />
+              <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-parley-field" />
               <div className="flex-1 space-y-2">
-                <div className="h-4 w-2/3 animate-pulse rounded bg-zoom-field" />
-                <div className="h-3 w-1/2 animate-pulse rounded bg-zoom-field" />
+                <div className="h-4 w-2/3 animate-pulse rounded bg-parley-field" />
+                <div className="h-3 w-1/2 animate-pulse rounded bg-parley-field" />
               </div>
             </div>
           ))}
         </div>
       ) : meetings.length === 0 ? (
-        <p className="px-3 py-8 text-center text-sm text-zoom-muted">
+        <p className="px-3 py-8 text-center text-sm text-parley-muted">
           {emptyText}
         </p>
       ) : (
-        <div className="-mx-2 divide-y divide-zoom-line/70">
+        <div className="-mx-2 divide-y divide-parley-line/70">
           {meetings.map((m) => (
             <MeetingListItem
               key={m.id}

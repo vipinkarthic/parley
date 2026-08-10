@@ -57,15 +57,15 @@ export function MeetingListItem({
   };
 
   return (
-    <div className="flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-zoom-field">
-      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-[#EEF3FF] text-zoom-blue">
+    <div className="flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-parley-field">
+      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-parley-tint text-parley-brand">
         <span className="text-[11px] font-semibold uppercase leading-none">{month}</span>
         <span className="text-xl font-bold leading-tight">{day}</span>
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[15px] font-semibold text-zoom-ink">{meeting.topic}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-zoom-muted">
+        <p className="truncate text-[15px] font-semibold text-parley-ink">{meeting.topic}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-parley-muted">
           <span className="inline-flex items-center gap-1">
             <ClockIcon className="h-3.5 w-3.5" />
             {formatMeetingTime(meeting.start_time)}
@@ -87,7 +87,7 @@ export function MeetingListItem({
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="grid h-9 w-9 place-items-center rounded-full text-zoom-muted transition-colors hover:bg-black/5"
+            className="grid h-9 w-9 place-items-center rounded-full text-parley-muted transition-colors hover:bg-black/5"
             aria-label="More options"
           >
             <MoreIcon className="h-5 w-5" />
@@ -95,10 +95,10 @@ export function MeetingListItem({
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-11 z-20 w-48 overflow-hidden rounded-xl border border-zoom-line bg-white py-1 shadow-modal animate-scale-in">
+              <div className="absolute right-0 top-11 z-20 w-48 overflow-hidden rounded-xl border border-parley-line bg-white py-1 shadow-modal animate-scale-in">
                 <button
                   onClick={copyInvitation}
-                  className="block w-full px-4 py-2.5 text-left text-sm text-zoom-ink hover:bg-zoom-field"
+                  className="block w-full px-4 py-2.5 text-left text-sm text-parley-ink hover:bg-parley-field"
                 >
                   Copy invitation
                 </button>
@@ -108,7 +108,7 @@ export function MeetingListItem({
                       onEdit(meeting);
                       setMenuOpen(false);
                     }}
-                    className="block w-full px-4 py-2.5 text-left text-sm text-zoom-ink hover:bg-zoom-field"
+                    className="block w-full px-4 py-2.5 text-left text-sm text-parley-ink hover:bg-parley-field"
                   >
                     Edit
                   </button>

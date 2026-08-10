@@ -12,7 +12,7 @@ body {
 }
 
 body {
-  color: #232333;
+  color: #1C2624;
   background: #ffffff;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -22,29 +22,29 @@ body {
   box-sizing: border-box;
 }
 
-/* Reusable Zoom-style component classes */
+/* Shared component classes */
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full bg-zoom-blue px-5 py-2.5
-      text-[15px] font-semibold text-white transition-colors hover:bg-zoom-bluehover
-      disabled:cursor-not-allowed disabled:bg-[#E5E7F0] disabled:text-[#9494A0];
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-parley-brand px-5 py-2.5
+      text-[15px] font-semibold text-white transition-colors hover:bg-parley-brandhover
+      disabled:cursor-not-allowed disabled:bg-[#DFE6E4] disabled:text-[#8A9694];
   }
   .btn-outline {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-zoom-blue
-      bg-white px-5 py-2.5 text-[15px] font-semibold text-zoom-blue transition-colors
-      hover:bg-[#F0F5FF];
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-parley-brand
+      bg-white px-5 py-2.5 text-[15px] font-semibold text-parley-brand transition-colors
+      hover:bg-parley-tint;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-[15px]
-      font-medium text-zoom-ink transition-colors hover:bg-black/5;
+      font-medium text-parley-ink transition-colors hover:bg-black/5;
   }
   .input {
-    @apply w-full rounded-lg border border-zoom-line bg-white px-3.5 py-2.5 text-[15px]
-      text-zoom-ink placeholder:text-zoom-subtle outline-none transition
-      focus:border-zoom-blue focus:ring-2 focus:ring-zoom-blue/20;
+    @apply w-full rounded-lg border border-parley-line bg-white px-3.5 py-2.5 text-[15px]
+      text-parley-ink placeholder:text-parley-subtle outline-none transition
+      focus:border-parley-brand focus:ring-2 focus:ring-parley-brand/20;
   }
   .label {
-    @apply mb-1.5 block text-sm font-medium text-zoom-ink;
+    @apply mb-1.5 block text-sm font-medium text-parley-ink;
   }
 }
 

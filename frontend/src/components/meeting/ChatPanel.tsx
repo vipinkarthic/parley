@@ -38,12 +38,12 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-zoom-line px-4 py-3">
-        <h3 className="font-semibold text-zoom-ink">Chat</h3>
+      <div className="flex items-center justify-between border-b border-parley-line px-4 py-3">
+        <h3 className="font-semibold text-parley-ink">Chat</h3>
         <button
           onClick={onClose}
           aria-label="Close panel"
-          className="grid h-7 w-7 place-items-center rounded-full text-zoom-muted hover:bg-black/5"
+          className="grid h-7 w-7 place-items-center rounded-full text-parley-muted hover:bg-black/5"
         >
           <CloseIcon className="h-4 w-4" />
         </button>
@@ -51,14 +51,14 @@ export function ChatPanel({
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {messages.length === 0 ? (
-          <p className="mt-6 text-center text-sm text-zoom-muted">
+          <p className="mt-6 text-center text-sm text-parley-muted">
             No messages yet. Say hello 👋
           </p>
         ) : (
           messages.map((m) => (
             <div key={m.id} className={m.self ? "text-right" : ""}>
-              <div className="mb-0.5 flex items-center gap-2 text-xs text-zoom-muted">
-                <span className="font-medium text-zoom-ink">
+              <div className="mb-0.5 flex items-center gap-2 text-xs text-parley-muted">
+                <span className="font-medium text-parley-ink">
                   {m.self ? "You" : m.sender}
                 </span>
                 <span>{m.time}</span>
@@ -66,8 +66,8 @@ export function ChatPanel({
               <div
                 className={`inline-block max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
                   m.self
-                    ? "bg-zoom-blue text-white"
-                    : "bg-zoom-field text-zoom-ink"
+                    ? "bg-parley-brand text-white"
+                    : "bg-parley-field text-parley-ink"
                 }`}
               >
                 {m.text}
@@ -78,9 +78,9 @@ export function ChatPanel({
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={send} className="border-t border-zoom-line p-3">
+      <form onSubmit={send} className="border-t border-parley-line p-3">
         {disabled ? (
-          <p className="py-1 text-center text-xs text-zoom-muted">
+          <p className="py-1 text-center text-xs text-parley-muted">
             Chat has been disabled by the host
           </p>
         ) : (

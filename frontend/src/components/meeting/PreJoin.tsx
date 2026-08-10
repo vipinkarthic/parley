@@ -109,7 +109,7 @@ export function PreJoin({
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zoom-dark px-4 py-8 text-white">
+    <div className="flex min-h-screen items-center justify-center bg-parley-dark px-4 py-8 text-white">
       <div className="w-full max-w-4xl">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold">{meeting.topic}</h1>
@@ -120,7 +120,7 @@ export function PreJoin({
         </div>
 
         <div className="grid gap-6 md:grid-cols-[1.4fr_1fr]">
-          <div className="relative aspect-video overflow-hidden rounded-2xl bg-zoom-panel ring-1 ring-white/10">
+          <div className="relative aspect-video overflow-hidden rounded-2xl bg-parley-panel ring-1 ring-white/10">
             {stream && camOn ? (
               <video
                 ref={videoRef}
@@ -164,7 +164,7 @@ export function PreJoin({
 
           <form
             onSubmit={submit}
-            className="flex flex-col justify-center gap-4 rounded-2xl bg-zoom-panel p-6 ring-1 ring-white/10"
+            className="flex flex-col justify-center gap-4 rounded-2xl bg-parley-panel p-6 ring-1 ring-white/10"
           >
             <div>
               <label className="mb-1.5 block text-sm font-medium text-white/80" htmlFor="pj-name">
@@ -175,7 +175,7 @@ export function PreJoin({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={40}
-                className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-zoom-blue"
+                className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-parley-brand"
                 placeholder="Enter your name"
               />
             </div>
@@ -189,7 +189,7 @@ export function PreJoin({
                   id="pj-pass"
                   value={passcode}
                   onChange={(e) => setPasscode(e.target.value)}
-                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-zoom-blue"
+                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-parley-brand"
                   placeholder="Enter passcode"
                 />
               </div>

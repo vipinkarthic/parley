@@ -69,7 +69,7 @@ export function JoinModal({
           {error ? (
             <p className="mt-1.5 text-xs text-[#EF4444]">{error}</p>
           ) : (
-            <p className="mt-1.5 text-xs text-zoom-muted">
+            <p className="mt-1.5 text-xs text-parley-muted">
               You can paste a full invite link - we&apos;ll pull out the ID.
             </p>
           )}

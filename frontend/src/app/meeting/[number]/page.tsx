@@ -430,7 +430,7 @@ function LiveRoom({
 
   if (m.admission === "waiting") {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zoom-dark px-4 text-center text-white">
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-parley-dark px-4 text-center text-white">
         <span className="h-12 w-12 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
         <div>
           <p className="text-lg font-semibold">Please wait, the meeting host will let you in soon</p>
@@ -452,8 +452,8 @@ function LiveRoom({
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zoom-dark text-white">
-      <header className="flex items-center justify-between gap-3 bg-zoom-darker px-4 py-2.5">
+    <div className="flex h-screen flex-col bg-parley-dark text-white">
+      <header className="flex items-center justify-between gap-3 bg-parley-darker px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid h-8 w-8 place-items-center rounded-md bg-[#12B76A]/15 text-[#12B76A]">
             <ShieldIcon className="h-4 w-4" />
@@ -556,7 +556,7 @@ function LiveRoom({
         {panel && (
           <>
             <div className="fixed inset-0 z-20 bg-black/40 md:hidden" onClick={() => setPanel(null)} />
-            <aside className="fixed inset-y-0 right-0 z-30 w-[340px] max-w-[85vw] bg-white text-zoom-ink shadow-modal md:static md:z-0 md:w-[340px] md:shadow-none md:ring-1 md:ring-zoom-line">
+            <aside className="fixed inset-y-0 right-0 z-30 w-[340px] max-w-[85vw] bg-white text-parley-ink shadow-modal md:static md:z-0 md:w-[340px] md:shadow-none md:ring-1 md:ring-parley-line">
               {panel === "participants" ? (
                 <ParticipantsPanel
                   people={people}
@@ -620,7 +620,7 @@ function LiveRoom({
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-zoom-dark px-4 text-center text-white">
+    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-parley-dark px-4 text-center text-white">
       {children}
     </div>
   );

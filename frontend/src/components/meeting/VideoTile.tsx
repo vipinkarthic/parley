@@ -39,7 +39,7 @@ export function VideoTile({
 
   return (
     <div
-      className={`group relative aspect-video overflow-hidden rounded-xl bg-zoom-panel ring-1 transition-shadow ${
+      className={`group relative aspect-video overflow-hidden rounded-xl bg-parley-panel ring-1 transition-shadow ${
         speaking ? "ring-2 ring-[#12B76A]" : "ring-white/5"
       }`}
     >

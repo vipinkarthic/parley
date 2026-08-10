@@ -41,13 +41,13 @@ function Control({
       disabled={disabled}
       title={title}
       className={`relative flex min-w-[60px] flex-col items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        active ? "text-zoom-blue" : "text-white/85 hover:bg-white/10"
+        active ? "text-parley-brand" : "text-white/85 hover:bg-white/10"
       }`}
     >
       <span className="grid h-9 w-9 place-items-center rounded-lg">{icon}</span>
       <span className="leading-none">{label}</span>
       {badge !== undefined && badge > 0 && (
-        <span className="absolute right-1.5 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-zoom-blue px-1 text-[10px] font-bold text-white">
+        <span className="absolute right-1.5 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-parley-brand px-1 text-[10px] font-bold text-white">
           {badge}
         </span>
       )}
@@ -111,7 +111,7 @@ export function ControlBar({
   const cantReact = !isHost && !settings.allow_reactions;
 
   return (
-    <div className="flex items-center justify-center gap-0.5 border-t border-white/10 bg-zoom-darker px-2 py-2.5">
+    <div className="flex items-center justify-center gap-0.5 border-t border-white/10 bg-parley-darker px-2 py-2.5">
       <Control
         icon={micOn ? <MicIcon className="h-5 w-5" /> : <MicOffIcon className="h-5 w-5 text-[#FF6B6B]" />}
         label={micOn ? "Mute" : "Unmute"}
@@ -158,7 +158,7 @@ export function ControlBar({
         {reactOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setReactOpen(false)} />
-            <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-full bg-zoom-panel px-2 py-1.5 shadow-modal animate-scale-in">
+            <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-full bg-parley-panel px-2 py-1.5 shadow-modal animate-scale-in">
               {REACTIONS.map((e) => (
                 <button
                   key={e}
@@ -209,7 +209,7 @@ export function ControlBar({
         {isHost && leaveOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setLeaveOpen(false)} />
-            <div className="absolute bottom-14 right-0 z-20 w-52 overflow-hidden rounded-xl bg-white py-1 text-zoom-ink shadow-modal animate-scale-in">
+            <div className="absolute bottom-14 right-0 z-20 w-52 overflow-hidden rounded-xl bg-white py-1 text-parley-ink shadow-modal animate-scale-in">
               <button
                 onClick={() => { setLeaveOpen(false); onEndForAll(); }}
                 className="block w-full px-4 py-2.5 text-left text-sm font-medium text-[#E02D2D] hover:bg-[#FEF3F2]"
@@ -218,7 +218,7 @@ export function ControlBar({
               </button>
               <button
                 onClick={() => { setLeaveOpen(false); onLeave(); }}
-                className="block w-full px-4 py-2.5 text-left text-sm text-zoom-ink hover:bg-zoom-field"
+                className="block w-full px-4 py-2.5 text-left text-sm text-parley-ink hover:bg-parley-field"
               >
                 Leave meeting
               </button>
