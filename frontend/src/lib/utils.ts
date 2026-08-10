@@ -51,7 +51,7 @@ export function dateParts(iso: string | null): { month: string; day: string } {
 
 export function colorFromName(name: string): string {
   const palette = [
-    "#0B5CFF", "#FF7A59", "#12B76A", "#7A5AF8",
+    "#0E7C74", "#E8833A", "#12B76A", "#7A5AF8",
     "#F79009", "#EF4444", "#06AED4", "#EC4899",
   ];
   let hash = 0;
@@ -71,12 +71,12 @@ export function invitationText(m: {
 }): string {
   const when = m.start_time ? formatMeetingTime(m.start_time) : null;
   return [
-    `${m.host.name} is inviting you to a Zoom meeting.`,
+    `${m.host.name} is inviting you to a Parley meeting.`,
     "",
     `Topic: ${m.topic}`,
     when ? `Time: ${when}` : null,
     "",
-    "Join Zoom Meeting",
+    "Join Parley Meeting",
     m.invite_link,
     "",
     `Meeting ID: ${formatMeetingNumber(m.meeting_number)}`,

@@ -40,15 +40,15 @@ export default function LoginPage() {
     <AuthShell
       headerRight={
         <>
-          New to Zoom?{" "}
-          <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
+          New to Parley?{" "}
+          <Link href="/signup" className="font-semibold text-parley-brand hover:underline">
             Sign Up Free
           </Link>
         </>
       }
     >
-      <h1 className="text-[28px] font-semibold text-zoom-ink">Sign in</h1>
-      <p className="mt-1 text-sm text-zoom-muted">
+      <h1 className="text-[28px] font-semibold text-parley-ink">Sign in</h1>
+      <p className="mt-1 text-sm text-parley-muted">
         Welcome back - sign in to start meeting.
       </p>
 
@@ -94,9 +94,9 @@ export default function LoginPage() {
             </button>
           </form>
 
-      <p className="mt-6 text-center text-sm text-zoom-muted">
+      <p className="mt-6 text-center text-sm text-parley-muted">
         Don&apos;t have an account?{" "}
-        <Link href="/signup" className="font-semibold text-zoom-blue hover:underline">
+        <Link href="/signup" className="font-semibold text-parley-brand hover:underline">
           Sign up
         </Link>
       </p>

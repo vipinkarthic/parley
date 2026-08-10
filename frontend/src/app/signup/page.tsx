@@ -82,7 +82,7 @@ export default function SignupPage() {
       headerRight={
         <>
           Already have an account?{" "}
-          <Link href="/login" className="font-semibold text-zoom-blue hover:underline">
+          <Link href="/login" className="font-semibold text-parley-brand hover:underline">
             Sign In
           </Link>
         </>
@@ -90,10 +90,10 @@ export default function SignupPage() {
     >
       {step === "details" ? (
         <>
-          <h1 className="text-[28px] font-semibold text-zoom-ink">
-            Get started with Zoom
+          <h1 className="text-[28px] font-semibold text-parley-ink">
+            Get started with Parley
           </h1>
-          <p className="mt-1 text-sm text-zoom-muted">
+          <p className="mt-1 text-sm text-parley-muted">
             We&apos;ll email you a code to verify it&apos;s really you.
           </p>
               <form onSubmit={requestOtp} className="mt-8 space-y-4">
@@ -158,19 +158,19 @@ export default function SignupPage() {
             </>
           ) : (
             <>
-              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-[#EEF3FF] text-zoom-blue">
+              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-parley-tint text-parley-brand">
                 <CheckIcon className="h-6 w-6" />
               </div>
-              <h1 className="text-center text-[26px] font-bold text-zoom-ink">
+              <h1 className="text-center text-[26px] font-bold text-parley-ink">
                 Verify your email
               </h1>
               {info && (
-                <p className="mt-1 text-center text-sm text-zoom-muted">{info}</p>
+                <p className="mt-1 text-center text-sm text-parley-muted">{info}</p>
               )}
               {devCode && (
-                <div className="mt-4 rounded-lg border border-dashed border-zoom-blue bg-[#EEF3FF] px-4 py-2.5 text-center text-sm">
-                  <span className="text-zoom-muted">Dev code: </span>
-                  <span className="font-bold tracking-widest text-zoom-blue">
+                <div className="mt-4 rounded-lg border border-dashed border-parley-brand bg-parley-tint px-4 py-2.5 text-center text-sm">
+                  <span className="text-parley-muted">Dev code: </span>
+                  <span className="font-bold tracking-widest text-parley-brand">
                     {devCode}
                   </span>
                 </div>
@@ -207,11 +207,11 @@ export default function SignupPage() {
                     setCode("");
                     setError(null);
                   }}
-                  className="text-zoom-muted hover:text-zoom-ink"
+                  className="text-parley-muted hover:text-parley-ink"
                 >
                   ← Change details
                 </button>
-                <button onClick={resend} className="font-medium text-zoom-blue hover:underline">
+                <button onClick={resend} className="font-medium text-parley-brand hover:underline">
                   Resend code
                 </button>
               </div>

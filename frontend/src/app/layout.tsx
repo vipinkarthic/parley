@@ -11,9 +11,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Zoom Clone - Video Conferencing",
+  title: "Parley - Video Meetings",
   description:
-    "A Zoom-style video conferencing platform: start instant meetings, schedule, and join with a meeting ID.",
+    "Video meetings that just work - start an instant meeting, schedule ahead, or join with a meeting ID.",
 };
 
 export default function RootLayout({
@@ -21,7 +21,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans text-zoom-ink antialiased">
+      <body className="font-sans text-parley-ink antialiased">
         <AuthProvider>
           <ToastProvider>{children}</ToastProvider>
         </AuthProvider>
