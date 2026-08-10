@@ -29,8 +29,8 @@ Thumbs.db
 frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
 
-# Assignment brief (not part of the app)
-*.docx
-
 # Local dev logs
 backend/uvlog.txt
+
+# Local-only working document
+PARLEY_PLAN.md

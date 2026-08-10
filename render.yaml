@@ -1,8 +1,11 @@
 # Render.com blueprint for the FastAPI backend.
 # Deploy: New + -> Blueprint, point at this repo (Render reads this file).
+# NOTE: `name` was zoom-clone-api. Render treats a renamed service in a
+# blueprint as a NEW service - rename it in the dashboard first, or expect a
+# fresh service (new URL, env vars not carried over) on the next sync.
 services:
   - type: web
-    name: zoom-clone-api
+    name: parley-api
     runtime: python
     rootDir: backend
     plan: free
@@ -10,6 +13,8 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
+      - key: APP_ENV
+        value: production            # hard-fails the boot if JWT_SECRET is unset
       - key: PYTHON_VERSION
         value: "3.12.6"
       - key: JWT_SECRET
@@ -18,7 +23,9 @@ services:
         sync: false                  # set to your Vercel URL (e.g. https://your-app.vercel.app)
       - key: CORS_ORIGINS
         sync: false                  # your Vercel URL; *.vercel.app is also allowed automatically
+      - key: SMTP_USER
+        sync: false                  # sending mailbox; required with SMTP_PASS for real email
       - key: SMTP_PASS
-        sync: false                  # optional: Gmail App Password for real OTP email (blank = dev-mode OTP)
+        sync: false                  # Gmail App Password. Blank (or no SMTP_USER) = dev-mode OTP
       - key: SEED_SAMPLE_DATA
         value: "false"               # demo accounts always seed; set true to also seed sample meetings
