@@ -34,3 +34,6 @@ backend/uvlog.txt
 
 # Local-only working document
 PARLEY_PLAN.md
+
+# Test artifacts
+backend/.pytest_cache/
