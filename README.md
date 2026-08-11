@@ -16,7 +16,7 @@ Media is peer-to-peer WebRTC; the server only relays signalling and app events.
 | ---------- | ------------------------------------------------------------------------------------- |
 | Frontend   | **Next.js 14** (App Router, client-rendered SPA), **React 18**, **TypeScript**, **Tailwind CSS** |
 | Backend    | **Python 3.12**, **FastAPI**, **SQLAlchemy 2.0**, **Pydantic v2**, **Uvicorn**        |
-| Database   | **SQLite** (hand-designed schema, no ORM magic tables)                                |
+| Database   | **PostgreSQL** on **Neon** (pooled endpoint), **Alembic** migrations, hand-designed schema |
 | Real-time  | **WebRTC** peer-to-peer mesh (`RTCPeerConnection`) + a **FastAPI WebSocket** signalling hub |
 | Auth       | **JWT** (PyJWT) + **bcrypt** password hashing + email **OTP** over SMTP               |
 
@@ -128,11 +128,12 @@ real ceiling, and it is a client-side one. See **Known limits**.
 
 ```
 parley/
-├── backend/                      # FastAPI + SQLite API
+├── backend/                      # FastAPI + Postgres API
 │   ├── app/
 │   │   ├── main.py               # App entrypoint, CORS, startup
 │   │   ├── config.py             # Env-driven config
-│   │   ├── database.py           # Engine, session, declarative base
+│   │   ├── database.py           # Engine (pooled, pre-ping), session, declarative base
+│   │   ├── dbtypes.py            # UtcDateTime: timezone-aware UTC columns
 │   │   ├── models.py             # SQLAlchemy models (User, Meeting, Participant, PendingSignup)
 │   │   ├── schemas.py            # Pydantic request/response schemas
 │   │   ├── crud.py               # DB operations
@@ -179,8 +180,14 @@ parley/
 
 ## Database Schema
 
-SQLite, four tables. `users` host `meetings`; each meeting has many
-`participants`; `pending_signups` is transient state during OTP signup.
+PostgreSQL, four tables, managed by Alembic. `users` host `meetings`; each
+meeting has many `participants`; `pending_signups` is transient state during
+OTP signup.
+
+Every timestamp column is `timestamptz` and every value written is UTC.
+Indexes cover what is actually filtered and ordered: `participants.meeting_id`,
+`meetings.host_id`, `meetings.start_time`, plus the unique `meetings.meeting_number`
+and `users.email`.
 
 ```
 users 1 ── * meetings 1 ── * participants
@@ -272,12 +279,43 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -r requirements.txt
-cp .env.example .env          # works as-is for local dev (dev-mode OTP)
+cp .env.example .env          # dev-mode OTP works with no further edits
+
+# Point DATABASE_URL at a Postgres database, then create the schema.
+# A free Neon dev branch is the closest thing to what runs in production.
+alembic upgrade head
+
 uvicorn app.main:app --reload --port 8000
 ```
 
-The SQLite file (`parley.db`) is created on first run. API runs at
-`http://localhost:8000` (interactive docs at `/docs`).
+API runs at `http://localhost:8000` (interactive docs at `/docs`).
+
+**Alembic owns the schema.** The app does not create tables on startup - it
+checks they exist and refuses to boot with a clear message if they do not, so a
+failed migration cannot quietly turn into a half-built database.
+
+| Command | Purpose |
+| ------- | ------- |
+| `alembic upgrade head` | Apply migrations |
+| `alembic current` | Show the applied revision |
+| `alembic check` | Confirm the models and migrations still agree |
+| `alembic downgrade base` | Roll back to an empty database (**destroys data**) |
+
+Leaving `DATABASE_URL` blank falls back to a local SQLite file. That path
+exists so the test suite runs offline; production refuses to start without a
+real `DATABASE_URL` rather than silently writing to a disk that is wiped on
+every deploy.
+
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                          # SQLite, offline
+TEST_DATABASE_URL=postgresql://... pytest       # against real Postgres
+```
+
+The suite builds its schema by running the migrations, so a green run also
+proves `alembic upgrade head` works from an empty database.
 
 **Seeded demo accounts** are created automatically on startup so you can log in
 right away (no OTP needed) - all share the password **`demo1234`**:
@@ -323,7 +361,11 @@ you're in.
 
 | Variable           | Default                              | Purpose                                          |
 | ------------------ | ------------------------------------ | ------------------------------------------------ |
-| `APP_ENV`          | `development` (`production` if `RENDER` is set) | Production refuses to boot without a real `JWT_SECRET` |
+| `APP_ENV`          | `development` (`production` if `RENDER` is set) | Production refuses to boot without a real `JWT_SECRET` or `DATABASE_URL` |
+| `DATABASE_URL`     | *(SQLite file locally; **required** in production)* | Postgres connection string - use Neon's **pooled** endpoint |
+| `DB_POOL_SIZE`     | `5`                                  | SQLAlchemy pool size                             |
+| `DB_MAX_OVERFLOW`  | `5`                                  | Connections allowed above the pool size          |
+| `DB_POOL_RECYCLE`  | `280`                                | Recycle connections before Neon's idle timeout   |
 | `FRONTEND_URL`     | `http://localhost:3000`              | Used to build invite links                       |
 | `CORS_ORIGINS`     | `http://localhost:3000,...`          | Allowed CORS origins                             |
 | `SEED_SAMPLE_DATA` | `false`                              | `true` seeds a few sample meetings for the first user |
@@ -419,12 +461,8 @@ Deliberate, and stated rather than papered over.
 - **No WebSocket reconnect.** A dropped socket (laptop sleeping, a redeploy,
   a network switch) ends that participant's meeting; there is no backoff and
   resume.
-- **SQLite.** Fine locally. On a container filesystem the database does not
-  survive a redeploy.
 - **Blocking OTP send.** Signup waits on the SMTP round trip, so signup latency
   is the mail provider's latency, and an SMTP outage fails signup.
-- **Naive local timestamps.** Times are local wall-clock end to end, so a
-  scheduled time displays exactly as picked, but they are not timezone-aware.
 - **Free-tier cold starts.** The hosted backend spins down when idle, so the
   first request after a quiet period can take 30-60 seconds.
 
