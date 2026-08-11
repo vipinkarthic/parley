@@ -1,11 +1,11 @@
 """Database operations for meetings and participants."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from . import models, schemas, utils
+from .models import _now
 
 
 _AVATAR_COLORS = [
@@ -81,7 +81,7 @@ def get_or_create_personal_meeting(
             host_id=user.id,
             meeting_type="instant",
             status="active",
-            start_time=datetime.now(),
+            start_time=_now(),
             duration=60,
         )
         db.add(meeting)
@@ -225,7 +225,7 @@ def create_instant_meeting(
         host_id=host.id,
         meeting_type="instant",
         status="active",
-        start_time=datetime.now(),
+        start_time=_now(),
         duration=60,
         **_settings_kwargs(data.settings),
     )
