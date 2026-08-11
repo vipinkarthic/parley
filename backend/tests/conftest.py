@@ -7,7 +7,11 @@ tests against SQLite and then against Postgres is what makes them a cutover
 check rather than a one-off.
 
     pytest                                    # SQLite
-    TEST_DATABASE_URL=postgresql+psycopg://... pytest    # Postgres
+    PARLEY_TEST_ALLOW_REMOTE=1 TEST_DATABASE_URL=postgresql://... pytest
+
+WARNING: the suite drops every table before and after the run. A remote
+database has to be opted into with PARLEY_TEST_ALLOW_REMOTE=1, and should only
+ever be a disposable one.
 """
 import os
 import sys
@@ -38,6 +42,52 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DB}
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 IS_POSTGRES = TEST_DATABASE_URL.startswith("postgres")
+
+
+def _assert_safe_to_destroy(url: str) -> None:
+    """Refuse to run against a database we are not clearly allowed to destroy.
+
+    This suite is destructive by construction: it drops every table, runs the
+    migrations, and drops them again on the way out. That is correct for a
+    throwaway database and catastrophic for a real one - and the difference
+    between the two is a single environment variable someone pasted.
+
+    This is not hypothetical. Pointing TEST_DATABASE_URL at a Neon branch
+    during this phase wiped that branch's schema at teardown. It was a dev
+    branch and the loss was nothing, but the same command against the
+    production branch would have dropped the live database.
+
+    Local databases are assumed disposable. Anything remote has to be opted
+    into out loud.
+    """
+    if url.startswith("sqlite"):
+        return
+
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "::1", ""}:
+        return
+
+    if os.environ.get("PARLEY_TEST_ALLOW_REMOTE") == "1":
+        return
+
+    raise RuntimeError(
+        f"Refusing to run the test suite against remote host {host!r}.\n"
+        "\n"
+        "This suite DROPS EVERY TABLE before and after the run. Against a "
+        "database that holds anything you care about, that is data loss.\n"
+        "\n"
+        "If the target really is disposable (a Neon dev branch, a scratch "
+        "database), opt in explicitly:\n"
+        "\n"
+        "    PARLEY_TEST_ALLOW_REMOTE=1 TEST_DATABASE_URL=... pytest\n"
+        "\n"
+        "Never set it for a branch the deployed app points at."
+    )
+
+
+_assert_safe_to_destroy(TEST_DATABASE_URL)
 
 
 def _install_test_engine():
