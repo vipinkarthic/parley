@@ -10,14 +10,38 @@ import { CalendarIcon, CheckIcon, CopyIcon } from "./Icons";
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 
-function defaults() {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0);
-  const pad = (n: number) => n.toString().padStart(2, "0");
+const pad = (n: number) => n.toString().padStart(2, "0");
+
+/** Split a Date into the local date + time strings the two inputs expect. */
+function localParts(d: Date) {
   return {
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
   };
+}
+
+/**
+ * The date and time inputs are local wall-clock; the API speaks UTC.
+ *
+ * These two functions are the only place that conversion happens. Sending the
+ * raw `2026-09-11T14:30:00` string used to work only because the backend
+ * stored it naive and handed it straight back - both ends were wrong in the
+ * same direction. Now that start_time is a real timestamptz, the offset has
+ * to be applied explicitly or a meeting scheduled at 2:30 PM comes back
+ * rendered in a different timezone.
+ */
+function localToUtcIso(date: string, time: string): string {
+  return new Date(`${date}T${time}:00`).toISOString();
+}
+
+function utcIsoToLocalParts(iso: string) {
+  return localParts(new Date(iso));
+}
+
+function defaults() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0);
+  return localParts(d);
 }
 
 export function ScheduleModal({
@@ -53,9 +77,9 @@ export function ScheduleModal({
       setTopic(editing.topic);
       setDescription(editing.description || "");
       if (editing.start_time) {
-        const [d, t] = editing.start_time.split("T");
-        setDate(d);
-        setTime((t || "00:00").slice(0, 5));
+        const parts = utcIsoToLocalParts(editing.start_time);
+        setDate(parts.date);
+        setTime(parts.time);
       }
       setDuration(editing.duration);
       setCreated(null);
@@ -85,7 +109,7 @@ export function ScheduleModal({
     if (!topic.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const start_time = `${date}T${time}:00`;
+      const start_time = localToUtcIso(date, time);
       const payload = {
         topic: topic.trim(),
         description: description.trim() || undefined,
