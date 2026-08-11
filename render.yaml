@@ -10,7 +10,11 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Migrations run before the server starts. Alembic owns the schema now -
+    # the app no longer creates tables on boot, and refuses to start if the
+    # schema is missing rather than papering over a failed migration.
+    # Safe on the free tier because it runs exactly one instance.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
       - key: APP_ENV
@@ -27,5 +31,10 @@ services:
         sync: false                  # sending mailbox; required with SMTP_PASS for real email
       - key: SMTP_PASS
         sync: false                  # Gmail App Password. Blank (or no SMTP_USER) = dev-mode OTP
+      - key: DATABASE_URL
+        sync: false                  # Neon POOLED string (host contains "-pooler").
+                                     # Required: the app refuses to boot without it.
       - key: SEED_SAMPLE_DATA
-        value: "false"               # demo accounts always seed; set true to also seed sample meetings
+        value: "false"               # demo accounts always seed; sample meetings would
+                                     # be seeded once against a persistent DB and then
+                                     # sit at a fixed past date forever. Keep off.

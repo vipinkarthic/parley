@@ -1,0 +1,5 @@
+# Test-only dependencies. Kept out of requirements.txt so the Render build
+# stays lean - nothing here is imported by the running application.
+-r requirements.txt
+pytest==8.3.4
+httpx==0.28.1
