@@ -52,15 +52,24 @@ def _install_test_engine():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from app import database
+    from app import config, database
+
+    # Use the URL the application derived, not the raw one from the
+    # environment: config normalises `postgres://` and `postgresql://` onto the
+    # psycopg driver. Building the test engine from the raw string instead
+    # sends SQLAlchemy looking for psycopg2, which is not a dependency - and a
+    # Neon URL pasted straight into TEST_DATABASE_URL is exactly the raw shape
+    # that breaks.
+    url = config.DATABASE_URL
 
     kwargs = {"future": True}
-    if TEST_DATABASE_URL.startswith("sqlite"):
+    if config.IS_SQLITE:
         kwargs["connect_args"] = {"check_same_thread": False}
     else:
         kwargs["pool_pre_ping"] = True
+        kwargs["connect_args"] = {"prepare_threshold": None}
 
-    engine = create_engine(TEST_DATABASE_URL, **kwargs)
+    engine = create_engine(url, **kwargs)
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     database.engine = engine
