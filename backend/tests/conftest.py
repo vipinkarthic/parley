@@ -80,18 +80,35 @@ ENGINE, SESSION_FACTORY = _install_test_engine()
 
 @pytest.fixture(scope="session", autouse=True)
 def _fresh_schema():
-    """Drop and recreate every table once per run.
+    """Build the schema by running the real migrations against an empty database.
 
-    This is the 'migrations run clean from empty' guarantee in test form: the
-    suite always starts from nothing.
+    Deliberately not ``Base.metadata.create_all()``. Using the migrations here
+    means every test run is also a test that ``alembic upgrade head`` works
+    from nothing - which is the actual Phase 1 acceptance criterion, and the
+    thing that would otherwise only ever be exercised by hand against Neon.
     """
+    from sqlalchemy import text
+
+    from alembic import command
+    from alembic.config import Config
+
     from app.database import Base
     from app import models  # noqa: F401  (registers the mappers)
 
+    # Start from genuinely nothing, including any leftover version bookkeeping.
     Base.metadata.drop_all(bind=ENGINE)
-    Base.metadata.create_all(bind=ENGINE)
+    with ENGINE.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+
+    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    command.upgrade(cfg, "head")
+
     yield
+
     Base.metadata.drop_all(bind=ENGINE)
+    with ENGINE.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
 
 
 @pytest.fixture(scope="session")
