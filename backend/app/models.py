@@ -13,11 +13,10 @@ Relationships
     User 1 ─── * Meeting        (host_id)
     Meeting 1 ─── * Participant  (meeting_id, cascade delete)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
-    DateTime,
     ForeignKey,
     Integer,
     String,
@@ -26,10 +25,17 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .dbtypes import UtcDateTime
 
 
 def _now() -> datetime:
-    return datetime.now()
+    """The application clock: timezone-aware UTC, always.
+
+    Naive local time in a database that outlives one machine is a bug waiting
+    for a deploy in a different timezone - the server runs in UTC, the person
+    scheduling the meeting does not.
+    """
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -43,7 +49,7 @@ class User(Base):
     avatar_color: Mapped[str] = mapped_column(String(9), default="#0E7C74")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pmi: Mapped[str] = mapped_column(String(11), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
 
     pref_video_on_join: Mapped[bool] = mapped_column(Boolean, default=True)
     pref_join_muted: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -69,9 +75,9 @@ class PendingSignup(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
 
 
 class Meeting(Base):
@@ -85,7 +91,10 @@ class Meeting(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     passcode: Mapped[str] = mapped_column(String(10), nullable=False)
 
-    host_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # indexed: every dashboard list filters meetings by their host
+    host_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
 
     meeting_type: Mapped[str] = mapped_column(String(20), default="instant")
     status: Mapped[str] = mapped_column(String(20), default="active")
@@ -100,10 +109,13 @@ class Meeting(Base):
     allow_chat: Mapped[bool] = mapped_column(Boolean, default=True)
     allow_reactions: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # indexed: the upcoming-meetings list orders every dashboard load by this
+    start_time: Mapped[datetime | None] = mapped_column(
+        UtcDateTime, nullable=True, index=True
+    )
     duration: Mapped[int] = mapped_column(Integer, default=30)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
 
     host: Mapped["User"] = relationship(back_populates="meetings")
     participants: Mapped[list["Participant"]] = relationship(
@@ -116,8 +128,10 @@ class Participant(Base):
     __tablename__ = "participants"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # indexed: every participant lookup filters on this, and it is the
+    # busiest table in the app
     meeting_id: Mapped[str] = mapped_column(
-        ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
     )
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
@@ -131,6 +145,6 @@ class Participant(Base):
     # secret the client sends back on the socket - peers only see the numeric id so nobody can fake being the host
     ws_token: Mapped[str] = mapped_column(String(40), default="")
 
-    joined_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    joined_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="participants")

@@ -1,0 +1,13 @@
+# Normalise line endings. backend/app/routers/meetings.py was the repo's only
+# CRLF file and any tool that rewrote it reflowed the whole file, turning a
+# two-line change into a 491-line diff. Pin LF so that cannot recur.
+* text=auto eol=lf
+
+# Binary assets must not be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

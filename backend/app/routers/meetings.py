@@ -1,12 +1,11 @@
 """Meeting + participant API routes."""
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..database import get_db
 from ..deps import get_current_user, get_optional_user
+from ..models import _now
 from ..serializers import meeting_out
 
 router = APIRouter(prefix="/api", tags=["meetings"])
@@ -188,7 +187,7 @@ def join_meeting(
         and not meeting.join_before_host
         and meeting.meeting_type == "scheduled"
         and meeting.start_time is not None
-        and datetime.now() < meeting.start_time
+        and _now() < meeting.start_time
     ):
         raise HTTPException(
             status_code=status.HTTP_425_TOO_EARLY,

@@ -4,11 +4,12 @@ Idempotent: demo accounts are created only if missing, and sample meetings are
 seeded once, so restarting the server never duplicates anything.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from . import models, utils
+from .models import _now
 from .config import SEED_SAMPLE_DATA
 from .security import hash_password
 
@@ -70,7 +71,7 @@ def seed_database(db: Session) -> None:
     if user is None:
         return
 
-    now = datetime.now()
+    now = _now()
 
     upcoming = [
         {

@@ -1,6 +1,7 @@
 """Runtime configuration read from environment variables."""
 import logging
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -50,6 +51,48 @@ if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
         "JWT_SECRET is the built-in development default - fine locally, but "
         "production will refuse to start without a real one."
     )
+
+# --- Database -------------------------------------------------------------
+# Neon hands out `postgresql://...`; SQLAlchemy needs the driver named, and
+# some hosts still emit the legacy `postgres://` scheme. Normalise both rather
+# than making the operator get the URL exactly right.
+_DEFAULT_SQLITE_URL = f"sqlite:///{Path(__file__).resolve().parent.parent / 'parley.db'}"
+
+
+def _normalise_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
+DATABASE_URL = _normalise_database_url(os.getenv("DATABASE_URL", "").strip())
+
+if not DATABASE_URL:
+    if IS_PRODUCTION:
+        # Falling back to SQLite here would put the database on Render's
+        # ephemeral disk, which is silently wiped on every deploy - the exact
+        # failure this phase exists to remove. Refuse to boot instead.
+        raise RuntimeError(
+            "DATABASE_URL is unset. Set the Neon pooled connection string "
+            "before running with APP_ENV=production."
+        )
+    DATABASE_URL = _DEFAULT_SQLITE_URL
+    logger.warning(
+        "DATABASE_URL is unset - falling back to a local SQLite file. Fine for "
+        "an offline test run; set the Neon URL for anything else."
+    )
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+# Neon's pooled endpoint is PgBouncer in transaction mode, which cannot carry
+# server-side prepared statements between transactions; psycopg3 creates them
+# automatically after a few executions. Sizes are deliberate rather than
+# defaulted: Render's free tier runs one instance.
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "280"))
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))
