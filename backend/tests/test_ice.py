@@ -45,3 +45,40 @@ def test_config_is_usable_as_an_rtc_configuration(client):
     assert set(body) <= {"iceServers", "iceCandidatePoolSize"}
     assert isinstance(body["iceCandidatePoolSize"], int)
     assert body["iceServers"], "an empty list would silently disable ICE"
+
+
+def test_the_dead_public_placeholder_is_flagged(client):
+    """The relay plumbing is complete; the default relay behind it is not.
+
+    Open Relay's public endpoint was measured on 2026-09-10 to answer a 401
+    challenge and then refuse every Allocate with 400 - identically for the
+    documented credentials, a wrong password and a nonexistent user, so it is
+    not checking credentials at all. Its :443 certificate also does not match
+    its hostname. Shipping that as a default is only acceptable if the code
+    says so out loud, which is what this asserts.
+    """
+    from app import config
+
+    assert config.TURN_IS_PLACEHOLDER is True, (
+        "Defaults changed: if TURN now points at a real account, this test "
+        "should assert False and the README's Known limits needs updating."
+    )
+
+
+def test_real_credentials_clear_the_placeholder_flag(monkeypatch):
+    """The override path, which is how this actually gets fixed."""
+    import importlib
+
+    from app import config
+
+    monkeypatch.setenv("TURN_URLS", "turn:relay.example.com:3478")
+    monkeypatch.setenv("TURN_USERNAME", "a-real-account")
+    monkeypatch.setenv("TURN_CREDENTIAL", "a-real-secret")
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.TURN_IS_PLACEHOLDER is False
+        assert reloaded.TURN_USERNAME == "a-real-account"
+    finally:
+        # Other tests share this module; leave it as they expect to find it.
+        monkeypatch.undo()
+        importlib.reload(config)

@@ -153,6 +153,7 @@ parley/
 │   │       └── users.py          # Contacts, profile, preferences
 │   ├── alembic/                  # Migration history (Alembic owns the schema)
 │   ├── tests/                    # pytest; runs on SQLite or Postgres unchanged
+│   ├── tools/turn_probe.py       # Verify a TURN account really allocates a relay
 │   ├── requirements.txt
 │   ├── Procfile                  # Backend start command (Render / Railway)
 │   └── .env.example
@@ -391,10 +392,12 @@ you're in.
 Real email needs **both** `SMTP_USER` and `SMTP_PASS`; with either missing the
 app stays in dev-mode OTP rather than failing at send time.
 
-The TURN defaults are Open Relay's **public shared** credentials, so a fresh
-checkout has a working relay with no signup. They are not secrets - the ICE
-list is served to the browser by design, and anything the browser holds is
-extractable. Point them at a dedicated account before relying on the relay.
+The TURN defaults are Open Relay's public endpoint, kept as a **placeholder**
+that documents the shape and keeps the relay code path exercised. It is
+verified non-functional (see Known limits), and the backend warns about it at
+boot - point these at a real account to actually get a relay. They are not
+secrets either way: the ICE list is served to the browser by design, and
+anything the browser holds is extractable.
 
 **Frontend** (`frontend/.env.local`)
 
@@ -476,12 +479,18 @@ Deliberate, and stated rather than papered over.
   and CPU grow with the square of the room. Small groups are the design target.
   **The exact ceiling has not been measured yet** - no number is claimed here
   until it has been.
-- **Shared public TURN relay.** A relay is configured, so peers behind
-  symmetric NAT or a corporate firewall do connect. It defaults to Open Relay's
-  public shared credentials, which have no quota guarantee - set `TURN_URLS`,
-  `TURN_USERNAME` and `TURN_CREDENTIAL` to a dedicated account for anything
-  that matters. Relayed media also costs latency and someone else's bandwidth,
-  so it is the fallback path, not the normal one.
+- **TURN needs an account before it does anything.** The relay path is fully
+  wired - `GET /api/ice`, credential rotation without a rebuild, ICE restart on
+  failure - but the default relay it points at does not work. Open Relay's
+  public endpoint was measured on 2026-09-10 to answer a 401 challenge and then
+  refuse every allocation with `400`, identically for its own documented
+  credentials, a wrong password and a nonexistent user; its `:443` TLS
+  certificate does not match its hostname either. **So until `TURN_URLS`,
+  `TURN_USERNAME` and `TURN_CREDENTIAL` are set to a real account, peers behind
+  symmetric NAT or a restrictive firewall still cannot connect.** The backend
+  logs a warning at boot while that is the case. Note also that relayed media
+  costs latency and someone's bandwidth, so it is the fallback path, not the
+  normal one.
 - **Single backend instance.** Room membership for signalling lives in process,
   so two instances would not see each other's rooms. Intentional at this scale -
   a meeting is a few hundred messages - but it means the backend does not scale

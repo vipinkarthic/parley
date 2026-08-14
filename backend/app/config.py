@@ -122,11 +122,11 @@ EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
 # bundle: NEXT_PUBLIC_* is inlined at build time, so a credential rotation
 # would otherwise mean a Vercel rebuild.
 #
-# The defaults are Open Relay's public shared credentials, so a fresh checkout
-# has a working relay with no signup. They are a shared free service with no
-# quota guarantee - set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL to a real
-# account before relying on it. These are not secrets: they reach the browser
-# by construction, and anything that reaches the browser is extractable.
+# The defaults are Open Relay's public endpoint, kept as a placeholder that
+# documents the shape and keeps the relay code path live. It does NOT work -
+# see the warning below, and set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL to
+# a real account. These values are not secrets: they reach the browser by
+# construction, and anything that reaches the browser is extractable.
 def _csv(name: str, default: str) -> list[str]:
     return [v.strip() for v in os.getenv(name, default).split(",") if v.strip()]
 
@@ -147,3 +147,30 @@ TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "openrelayproject")
 # Pre-gathering a couple of candidates shaves a round trip off the first
 # connection without holding a relay allocation open for every idle tab.
 ICE_CANDIDATE_POOL_SIZE = int(os.getenv("ICE_CANDIDATE_POOL_SIZE", "2"))
+
+_PLACEHOLDER_TURN_HOST = "openrelay.metered.ca"
+_PLACEHOLDER_TURN_USERNAME = "openrelayproject"
+
+# Whether TURN is still the known-dead placeholder rather than a real relay.
+TURN_IS_PLACEHOLDER = TURN_USERNAME == _PLACEHOLDER_TURN_USERNAME or any(
+    _PLACEHOLDER_TURN_HOST in url for url in TURN_URLS
+)
+
+if TURN_IS_PLACEHOLDER:
+    # Measured 2026-09-10, not assumed. Open Relay's public endpoint issues a
+    # 401 challenge and then refuses every Allocate with 400 Bad Request - and
+    # it does so identically for the documented credentials, a deliberately
+    # wrong password and a nonexistent user, so it is not evaluating
+    # credentials at all. Its :443 TLS certificate also does not match its own
+    # hostname, so the `turns:` entry cannot be used by a browser either.
+    #
+    # A warning rather than a hard failure: unlike a missing JWT_SECRET, this
+    # degrades connectivity instead of compromising it, and refusing to boot
+    # would take the whole demo down to protest a relay - which is worse than
+    # running without one.
+    logger.warning(
+        "TURN is the Open Relay public placeholder, which was measured to "
+        "refuse every allocation. There is effectively NO relay: peers behind "
+        "symmetric NAT or a restrictive firewall will fail to connect. Set "
+        "TURN_URLS, TURN_USERNAME and TURN_CREDENTIAL to a real account."
+    )
