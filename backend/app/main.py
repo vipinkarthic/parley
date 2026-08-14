@@ -2,19 +2,24 @@
 import asyncio
 import logging
 import signal
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
-from .config import CORS_ORIGINS
+from .config import APP_ENV, CORS_ORIGINS
 from .database import SessionLocal, engine
+from .logging_setup import configure_logging, request_id_var
 from .routers import auth, ice, meetings, users
 from .seed import seed_database
 from .ws import hub
 from .ws import router as ws_router
+
+configure_logging()
 
 logger = logging.getLogger("parley")
 
@@ -118,6 +123,57 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+REQUEST_ID_HEADER = "X-Request-ID"
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Give every request an id, and log one line per request.
+
+    An inbound id is honoured so a trace can be followed across a proxy;
+    otherwise one is minted. It goes back out on the response, which is what
+    makes an error a user reports findable in the logs.
+
+    HTTP only - ASGI http middleware is never invoked for a websocket scope,
+    and the signalling socket does its own logging.
+    """
+    incoming = (request.headers.get(REQUEST_ID_HEADER) or "").strip()
+    request_id = incoming[:64] or uuid.uuid4().hex[:12]
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request failed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            },
+        )
+        raise
+    finally:
+        request_id_var.reset(token)
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    response.headers[REQUEST_ID_HEADER] = request_id
+    logger.info(
+        "%s %s -> %s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
+    return response
+
+
 app.include_router(auth.router)
 app.include_router(meetings.router)
 app.include_router(users.router)
@@ -127,4 +183,38 @@ app.include_router(ws_router)
 
 @app.get("/", tags=["health"])
 def health():
+    """The original health route. Kept as-is: Render's deployed service has
+    its health check pointed here, and changing it would need a dashboard
+    change to land at the same moment as the code."""
     return {"status": "ok", "service": "parley-api"}
+
+
+@app.get("/healthz", tags=["health"])
+def healthz():
+    """Liveness. Deliberately does not touch the database.
+
+    This is what the keepalive from tle-machine pings every ten minutes to
+    stop Render's free tier spinning the service down. Neon's free plan meters
+    compute-hours and scales its compute to zero after about five minutes
+    idle, so a health check that opened a connection would hold the database
+    awake around the clock - spending Neon's entire monthly allowance to keep
+    Render's instance warm. Use /readyz when the database is the question.
+    """
+    return {"status": "ok", "service": "parley-api", "env": APP_ENV}
+
+
+@app.get("/readyz", tags=["health"])
+def readyz(response: Response):
+    """Readiness, database included. Do not point the keepalive at this.
+
+    The error is logged rather than returned: a driver exception can carry the
+    connection string, and this endpoint is unauthenticated.
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("readiness check failed")
+        response.status_code = 503
+        return {"status": "unavailable", "database": "unreachable"}
+    return {"status": "ok", "database": "ok"}

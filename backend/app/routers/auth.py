@@ -1,8 +1,9 @@
 """Authentication: email/password login + OTP-verified signup."""
+import logging
 import secrets
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import config, crud, models, ratelimit, schemas
@@ -16,6 +17,8 @@ from ..security import (
     hash_password,
     verify_password,
 )
+
+logger = logging.getLogger("parley.auth")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,18 +38,48 @@ def _rate_limit(kind: str, email: str, limit: int, window: int) -> None:
         )
 
 
-def _dispatch_otp(email: str, code: str) -> bool:
-    """Send the OTP, converting a delivery failure into a clean 502."""
+def _send_otp_in_background(email: str, code: str) -> None:
+    """Deliver the OTP after the response has already gone out.
+
+    A failure here cannot be reported to the caller, which is the trade being
+    made: the pending signup row is already committed, so the user's recourse
+    is the resend button rather than a failed signup. Logged loudly, because
+    this is now the only place a delivery problem shows up.
+    """
     try:
-        return send_otp_email(email, code)
+        send_otp_email(email, code)
     except EmailSendError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
+        logger.error("background OTP delivery to %s failed: %s", email, exc)
+
+
+def _dispatch_otp(background: BackgroundTasks, email: str, code: str) -> bool:
+    """Queue the OTP and report whether a real email is on its way.
+
+    Signup used to block on Gmail's SMTP round trip, so signup latency *was*
+    Gmail's latency - and SMTP being slow or down failed the whole signup with
+    a 502, even though the pending row was already written and a resend would
+    have worked. Delivery is now a background task and signup no longer
+    depends on a third party being up.
+
+    The response contract is unchanged, because EMAIL_ENABLED is known
+    synchronously: `email_sent` still says whether to expect an email and
+    `dev_code` still carries the code when no mailer is configured. The dev
+    path stays inline - it only writes to the log, and deferring it would mean
+    the code was not there yet when the developer went looking for it.
+    """
+    if not config.EMAIL_ENABLED:
+        send_otp_email(email, code)
+        return False
+    background.add_task(_send_otp_in_background, email, code)
+    return True
 
 
 @router.post("/signup/request-otp", response_model=schemas.OtpRequestResponse)
-def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db)):
+def request_signup_otp(
+    data: schemas.SignupRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     if crud.get_user_by_email(db, data.email):
         raise HTTPException(
@@ -63,7 +96,7 @@ def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db
         code_hash=hash_code(code),
         expires_at=_now() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
-    email_sent = _dispatch_otp(data.email, code)
+    email_sent = _dispatch_otp(background, data.email, code)
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
@@ -72,7 +105,11 @@ def request_signup_otp(data: schemas.SignupRequest, db: Session = Depends(get_db
 
 
 @router.post("/signup/resend-otp", response_model=schemas.OtpRequestResponse)
-def resend_signup_otp(data: schemas.ResendOtpRequest, db: Session = Depends(get_db)):
+def resend_signup_otp(
+    data: schemas.ResendOtpRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
@@ -89,7 +126,7 @@ def resend_signup_otp(data: schemas.ResendOtpRequest, db: Session = Depends(get_
         code_hash=hash_code(code),
         expires_at=_now() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
-    email_sent = _dispatch_otp(data.email, code)
+    email_sent = _dispatch_otp(background, data.email, code)
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
