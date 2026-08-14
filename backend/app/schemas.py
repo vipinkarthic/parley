@@ -181,3 +181,18 @@ class MeetingOut(BaseModel):
     host: UserOut
     invite_link: str
     participant_count: int
+
+
+class IceServer(BaseModel):
+    """One RTCIceServer entry, spelled the way the WebRTC API expects it."""
+
+    urls: list[str]
+    username: str | None = None
+    credential: str | None = None
+
+
+class IceConfig(BaseModel):
+    """Shaped to be passed straight into `new RTCPeerConnection(...)`."""
+
+    iceServers: list[IceServer]
+    iceCandidatePoolSize: int = 0

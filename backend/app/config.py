@@ -111,3 +111,39 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 # Both halves are needed to authenticate to SMTP; with only one, sending would
 # fail at delivery time instead of falling back to the dev OTP path.
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
+
+# --- WebRTC ICE -----------------------------------------------------------
+# STUN only tells a peer its public address; it does not carry media. Behind
+# symmetric NAT or a corporate firewall there is no direct path to discover, so
+# without a TURN relay those peers cannot connect *at all* - which is a
+# correctness bug, not a quality-of-service one.
+#
+# Served to the browser by GET /api/ice rather than baked into the frontend
+# bundle: NEXT_PUBLIC_* is inlined at build time, so a credential rotation
+# would otherwise mean a Vercel rebuild.
+#
+# The defaults are Open Relay's public shared credentials, so a fresh checkout
+# has a working relay with no signup. They are a shared free service with no
+# quota guarantee - set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL to a real
+# account before relying on it. These are not secrets: they reach the browser
+# by construction, and anything that reaches the browser is extractable.
+def _csv(name: str, default: str) -> list[str]:
+    return [v.strip() for v in os.getenv(name, default).split(",") if v.strip()]
+
+
+STUN_URLS = _csv(
+    "STUN_URLS",
+    "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302",
+)
+TURN_URLS = _csv(
+    "TURN_URLS",
+    "turn:openrelay.metered.ca:80,"
+    "turn:openrelay.metered.ca:443,"
+    "turns:openrelay.metered.ca:443?transport=tcp",
+)
+TURN_USERNAME = os.getenv("TURN_USERNAME", "openrelayproject")
+TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "openrelayproject")
+
+# Pre-gathering a couple of candidates shaves a round trip off the first
+# connection without holding a relay allocation open for every idle tab.
+ICE_CANDIDATE_POOL_SIZE = int(os.getenv("ICE_CANDIDATE_POOL_SIZE", "2"))

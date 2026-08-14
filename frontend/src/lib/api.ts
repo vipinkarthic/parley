@@ -176,4 +176,37 @@ export const api = {
     }),
 };
 
+// --- ICE configuration ----------------------------------------------------
+// The relay credentials come from the API instead of NEXT_PUBLIC_*, which is
+// inlined at build time and would make a credential rotation a Vercel rebuild.
+
+export interface IceConfig {
+  iceServers: RTCIceServer[];
+  iceCandidatePoolSize?: number;
+}
+
+// STUN-only, i.e. exactly what shipped before TURN existed. Used when the
+// fetch fails: peers with a direct path still connect, peers behind symmetric
+// NAT still cannot. Degraded, not broken.
+const STUN_ONLY: IceConfig = {
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  ],
+};
+
+// One fetch per page load, shared by every peer connection. Cached as the
+// promise, not the result, so N peers arriving at once make one request.
+let icePromise: Promise<IceConfig> | null = null;
+
+export function fetchIceConfig(): Promise<IceConfig> {
+  if (!icePromise) {
+    icePromise = request<IceConfig>("/api/ice")
+      .then((cfg) =>
+        cfg?.iceServers?.length ? cfg : STUN_ONLY
+      )
+      .catch(() => STUN_ONLY);
+  }
+  return icePromise;
+}
+
 export { ApiError };

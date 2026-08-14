@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchIceConfig, type IceConfig } from "./api";
 import type { MeetingSettings } from "./types";
 
 export interface RemotePeer {
@@ -42,10 +43,14 @@ interface PeerBox {
   screenSender: RTCRtpSender | null;
 }
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
+// Used only until GET /api/ice answers. STUN alone cannot relay media, so a
+// peer behind symmetric NAT or a corporate firewall has no path at all with
+// this list - which is why the real one is fetched rather than compiled in.
+const ICE_FALLBACK: IceConfig = {
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  ],
+};
 
 const DEFAULT_SETTINGS: MeetingSettings = {
   waiting_room: true,
@@ -134,6 +139,7 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Map<number, PeerBox>>(new Map());
+  const iceConfigRef = useRef<IceConfig>(ICE_FALLBACK);
   const startedRef = useRef(false);
   const stateRef = useRef({ muted: !initialMicOn, videoOn: initialCamOn });
   const localStreamRef = useRef<MediaStream | null>(localStream);
@@ -202,6 +208,7 @@ export function useMeeting(opts: UseMeetingOptions) {
     if (box) {
       box.pc.onicecandidate = null;
       box.pc.ontrack = null;
+      box.pc.oniceconnectionstatechange = null;
       box.pc.close();
       pcsRef.current.delete(id);
     }
@@ -218,7 +225,11 @@ export function useMeeting(opts: UseMeetingOptions) {
       const existing = pcsRef.current.get(peerId);
       if (existing) return existing.pc;
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const cfg = iceConfigRef.current;
+      const pc = new RTCPeerConnection({
+        iceServers: cfg.iceServers,
+        iceCandidatePoolSize: cfg.iceCandidatePoolSize,
+      });
       const box: PeerBox = { pc, streams: new Map(), screenSid: null, screenSender: null };
       pcsRef.current.set(peerId, box);
 
@@ -236,9 +247,25 @@ export function useMeeting(opts: UseMeetingOptions) {
         if (!box.streams.has(stream.id)) box.streams.set(stream.id, stream);
         recompute(peerId);
       };
+      // "failed" is terminal - ICE will not retry by itself, so a peer whose
+      // candidates all died (network change, relay allocation expired) stays
+      // black forever without this. Only the lower participant id restarts,
+      // because two simultaneous offers on one connection is glare.
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState !== "failed") return;
+        if (participantId >= peerId) return;
+        void (async () => {
+          try {
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+            send({ type: "offer", to: peerId, sdp: pc.localDescription });
+          } catch {
+          }
+        })();
+      };
       return pc;
     },
-    [send, recompute]
+    [send, recompute, participantId]
   );
 
   const makeOffer = useCallback(
@@ -476,11 +503,6 @@ export function useMeeting(opts: UseMeetingOptions) {
       `${wsBase()}/ws/meetings/${encodeURIComponent(number)}` +
       `?pid=${participantId}&token=${encodeURIComponent(wsToken)}` +
       `&muted=${stateRef.current.muted ? 1 : 0}&video=${stateRef.current.videoOn ? 1 : 0}`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => !cancelled && setStatus("live");
-    ws.onerror = () => !cancelled && setStatus("error");
 
     const applyPeerShareInfo = (peer: RemotePeer & { screenSid?: string | null }) => {
       if (peer.sharing && peer.screenSid) {
@@ -492,7 +514,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       }
     };
 
-    ws.onmessage = async (event) => {
+    const onMessage = async (event: MessageEvent) => {
       const msg = JSON.parse(event.data);
       switch (msg.type) {
         case "peers":
@@ -609,6 +631,19 @@ export function useMeeting(opts: UseMeetingOptions) {
           break;
       }
     };
+
+    // The relay list must be in hand before the first RTCPeerConnection is
+    // constructed - a peer connection cannot be given ICE servers after the
+    // fact - so the socket waits on it. One fetch per page load, cached.
+    void (async () => {
+      iceConfigRef.current = await fetchIceConfig();
+      if (cancelled) return;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+      ws.onopen = () => !cancelled && setStatus("live");
+      ws.onerror = () => !cancelled && setStatus("error");
+      ws.onmessage = onMessage;
+    })();
 
     return () => {
       cancelled = true;
