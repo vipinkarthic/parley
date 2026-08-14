@@ -103,6 +103,22 @@ def test_join_without_a_key_still_works(client):
     assert r.json()["ws_token"]
 
 
+def test_two_keyless_joins_coexist(client):
+    """The unique constraint must not turn "no key" into a collision.
+
+    `UNIQUE (meeting_id, join_key)` with a NULL key relies on NULLs not being
+    equal to each other, which is standard and true on both SQLite and
+    Postgres - but it is the kind of assumption that only fails in production,
+    on the engine the tests were not run against.
+    """
+    _, meeting = _meeting(client)
+    number, passcode = meeting["meeting_number"], meeting["passcode"]
+    a = _join(client, number, "Keyless A", passcode=passcode)
+    b = _join(client, number, "Keyless B", passcode=passcode)
+    assert a.status_code == 201 and b.status_code == 201
+    assert a.json()["id"] != b.json()["id"]
+
+
 def test_replay_is_refused_once_the_meeting_has_ended(client):
     token, meeting = _meeting(client)
     number = meeting["meeting_number"]
