@@ -476,11 +476,33 @@ function LiveRoom({
         <div className="flex items-center gap-2">
           <span
             className={`hidden items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium sm:flex ${
-              m.status === "live" ? "bg-[#12B76A]/15 text-[#12B76A]" : "bg-white/10 text-white/70"
+              m.status === "live"
+                ? "bg-[#12B76A]/15 text-[#12B76A]"
+                : m.status === "error"
+                  ? "bg-[#F04438]/15 text-[#F97066]"
+                  : "bg-white/10 text-white/70"
             }`}
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${m.status === "live" ? "bg-[#12B76A]" : "bg-white/50"}`} />
-            {m.status === "live" ? "Live" : m.status === "error" ? "Reconnecting..." : "Connecting..."}
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                m.status === "live"
+                  ? "bg-[#12B76A]"
+                  : m.status === "error"
+                    ? "bg-[#F97066]"
+                    : "animate-pulse bg-white/50"
+              }`}
+            />
+            {/* "error" is now genuinely terminal - removed, denied, or the
+                meeting ended - so it must not keep saying "Reconnecting", which
+                is what it said for every disconnection before reconnect
+                existed. */}
+            {m.status === "live"
+              ? "Live"
+              : m.status === "reconnecting"
+                ? "Reconnecting..."
+                : m.status === "error"
+                  ? "Disconnected"
+                  : "Connecting..."}
           </span>
           <span className="hidden rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium tabular-nums sm:block">
             {formatElapsed(elapsed)}

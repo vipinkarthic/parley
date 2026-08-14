@@ -27,6 +27,10 @@ WS_DENIED = 4004
 WS_MEETING_ENDED = 4005
 WS_SUPERSEDED = 4009
 
+# RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
+# Render service, and it is not an error - the client is expected to come back.
+WS_SERVICE_RESTART = 1012
+
 
 SETTING_KEYS = (
     "waiting_room", "locked", "mute_on_entry", "join_before_host",
@@ -40,6 +44,35 @@ class Hub:
         self.rooms: dict[str, dict[int, dict]] = {}
         self.lobbies: dict[str, dict[int, dict]] = {}
         self.settings: dict[str, dict] = {}
+        # Set on SIGTERM. Room state lives in this process, so a redeploy
+        # necessarily ends every meeting on this instance; the flag is what
+        # turns that into a reconnect rather than a failure.
+        self.shutting_down = False
+
+    def socket_count(self) -> int:
+        return sum(len(r) for r in self.rooms.values()) + sum(
+            len(lobby) for lobby in self.lobbies.values()
+        )
+
+    async def close_all(self, code: int = WS_SERVICE_RESTART) -> None:
+        """Close every socket with a code the client treats as retryable.
+
+        Materialises the list first: closing a socket runs its handler's
+        teardown, which mutates the dicts being walked.
+        """
+        entries = [
+            entry
+            for group in (self.rooms, self.lobbies)
+            for space in list(group.values())
+            for entry in list(space.values())
+        ]
+        for entry in entries:
+            try:
+                await entry["ws"].close(code=code)
+            except Exception:
+                pass
+        self.rooms.clear()
+        self.lobbies.clear()
 
     def setting(self, number: str, key: str) -> bool:
         return self.settings.get(number, {}).get(key, True)
@@ -245,6 +278,12 @@ async def _admit(number: str, meeting_id: str, target: int) -> None:
 @router.websocket("/ws/meetings/{number}")
 async def meeting_socket(websocket: WebSocket, number: str):
     await websocket.accept()
+    if hub.shutting_down:
+        # Admitting anyone now would hand them room state that is about to
+        # disappear with the process. Turn them away retryably instead, so
+        # they land on the instance that replaces this one.
+        await websocket.close(code=WS_SERVICE_RESTART)
+        return
     params = websocket.query_params
     try:
         pid = int(params.get("pid", ""))
@@ -317,6 +356,15 @@ async def meeting_socket(websocket: WebSocket, number: str):
         while True:
             data = json.loads(await websocket.receive_text())
             mtype = data.get("type")
+
+            # Heartbeat, answered before the lobby gate because someone
+            # waiting to be admitted needs their socket checked too. A laptop
+            # that slept leaves a half-open TCP connection that never fires a
+            # close event, so the client's own unanswered pings are the only
+            # thing that notices.
+            if mtype == "ping":
+                await hub.send(websocket, {"type": "pong"})
+                continue
 
             # ignore anything from people still in the lobby - checked live so a just-admitted guest relays right away
             if pid not in hub.rooms.get(number, {}):
@@ -462,4 +510,9 @@ async def meeting_socket(websocket: WebSocket, number: str):
             elif pid in hub.lobbies.get(number, {}):
                 hub.remove_lobby(number, pid)
                 await hub.notify_hosts_waiting(number)
-            _deactivate(meeting_id, pid)
+            # During a redeploy every participant is about to reconnect, so
+            # marking them inactive would make the API report empty meetings
+            # and hostless waiting rooms for the length of the deploy - and
+            # spend one database write per participant to do it.
+            if not hub.shutting_down:
+                _deactivate(meeting_id, pid)

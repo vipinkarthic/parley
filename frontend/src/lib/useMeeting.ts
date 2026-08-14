@@ -83,6 +83,31 @@ function nowTime(): string {
 
 let seq = 1;
 
+// Reconnect tuning.
+//
+// A dropped signalling socket used to end the meeting outright. It now comes
+// back, and these are the numbers that decide how it feels: fast enough that
+// a redeploy is a blink, slow enough that a backend which is genuinely down
+// is not being hammered by every open tab.
+const BASE_BACKOFF_MS = 500;
+const MAX_BACKOFF_MS = 15_000;
+// Every 20s, cheap: one JSON frame. This is the only thing that notices a
+// half-open socket - the kind a laptop leaves behind when it sleeps, which
+// reports OPEN and never fires a close event.
+const HEARTBEAT_MS = 20_000;
+// How long a probe ping gets before the socket is declared dead.
+const PONG_GRACE_MS = 5_000;
+
+// Close codes the client must not retry: the participant is not coming back
+// into this meeting, so retrying would be an infinite loop against a server
+// that is answering correctly. See the matching constants in ws.py.
+const TERMINAL_CLOSE_CODES = new Set([
+  4001, // malformed participant id
+  4003, // token rejected
+  4004, // the host denied this guest
+  4005, // the meeting has ended
+]);
+
 export interface UseMeetingOptions {
   number: string;
   participantId: number;
@@ -129,7 +154,9 @@ export function useMeeting(opts: UseMeetingOptions) {
   const [isSharing, setIsSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [activeSpeakerId, setActiveSpeakerId] = useState<number | "me" | null>(null);
-  const [status, setStatus] = useState<"connecting" | "live" | "error">("connecting");
+  const [status, setStatus] = useState<
+    "connecting" | "live" | "reconnecting" | "error"
+  >("connecting");
 
   const [admission, setAdmission] = useState<"admitted" | "waiting">(initialAdmission);
   const [waitingList, setWaitingList] = useState<WaitingPerson[]>([]);
@@ -146,6 +173,7 @@ export function useMeeting(opts: UseMeetingOptions) {
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const sharingRef = useRef(false);
+  const handRaisedRef = useRef(false);
   const myNameRef = useRef(displayName);
 
   useEffect(() => {
@@ -159,6 +187,9 @@ export function useMeeting(opts: UseMeetingOptions) {
   useEffect(() => {
     myNameRef.current = myName;
   }, [myName]);
+  useEffect(() => {
+    handRaisedRef.current = handRaised;
+  }, [handRaised]);
 
   const upsertPeer = useCallback(
     (id: number, patch: Partial<RemotePeer>, base?: Partial<RemotePeer>) => {
@@ -497,9 +528,22 @@ export function useMeeting(opts: UseMeetingOptions) {
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    let cancelled = false;
 
-    const url =
+    // Everything below lives in this closure rather than in refs because it
+    // is all one connection's worth of state, and the effect owns exactly one
+    // connection lifecycle at a time.
+    let cancelled = false;
+    let socket: WebSocket | null = null;
+    let attempt = 0;
+    let terminal = false;
+    let awaitingPong = false;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let probeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Rebuilt per attempt: mic and camera state travels in the query string,
+    // and by the time we reconnect it may not be what it was at first join.
+    const socketUrl = () =>
       `${wsBase()}/ws/meetings/${encodeURIComponent(number)}` +
       `?pid=${participantId}&token=${encodeURIComponent(wsToken)}` +
       `&muted=${stateRef.current.muted ? 1 : 0}&video=${stateRef.current.videoOn ? 1 : 0}`;
@@ -522,6 +566,14 @@ export function useMeeting(opts: UseMeetingOptions) {
             upsertPeer(peer.id, {}, peer);
             ensurePc(peer.id);
             applyPeerShareInfo(peer);
+            // The lower participant id owns the offer for a pair. Ids are
+            // handed out in ascending order, so on a first join ours is
+            // always the highest and the peers already in the room do the
+            // offering - which is why this loop never used to offer at all.
+            // A reconnect keeps our original, lower id, and then every peer
+            // evaluates "their id < ours" as false and nobody offers: the
+            // socket comes back and the video never does.
+            if (participantId < peer.id) makeOffer(peer.id);
           }
           break;
         case "peer-joined": {
@@ -601,10 +653,18 @@ export function useMeeting(opts: UseMeetingOptions) {
         case "force-mute":
           forceMuteSelf();
           break;
+        case "pong":
+          awaitingPong = false;
+          break;
+        // These three end this participant's meeting. Flagging them stops the
+        // reconnect loop, which would otherwise cheerfully dial back in to a
+        // meeting the host just removed us from.
         case "removed":
+          terminal = true;
           onRemoved?.();
           break;
         case "meeting-ended":
+          terminal = true;
           onEnded?.();
           break;
         case "waiting":
@@ -624,6 +684,7 @@ export function useMeeting(opts: UseMeetingOptions) {
           setSettings((s) => ({ ...s, waiting_room: !!msg.on }));
           break;
         case "denied":
+          terminal = true;
           onDenied?.();
           break;
         case "peer-left":
@@ -632,25 +693,160 @@ export function useMeeting(opts: UseMeetingOptions) {
       }
     };
 
+    const clearTimers = () => {
+      if (heartbeat) clearInterval(heartbeat);
+      if (retryTimer) clearTimeout(retryTimer);
+      if (probeTimer) clearTimeout(probeTimer);
+      heartbeat = retryTimer = probeTimer = null;
+      awaitingPong = false;
+    };
+
+    const closePeers = () => {
+      pcsRef.current.forEach((box) => {
+        box.pc.onicecandidate = null;
+        box.pc.ontrack = null;
+        box.pc.oniceconnectionstatechange = null;
+        box.pc.close();
+      });
+      pcsRef.current.clear();
+    };
+
+    const ping = () => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      awaitingPong = true;
+      try {
+        socket.send(JSON.stringify({ type: "ping" }));
+      } catch {
+        socket.close();
+      }
+    };
+
+    const startHeartbeat = () => {
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = setInterval(() => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        if (awaitingPong) {
+          // The previous ping was never answered. A socket in this state
+          // reports OPEN and will never fire a close event on its own, so
+          // closing it by hand is the only way back.
+          socket.close();
+          return;
+        }
+        ping();
+      }, HEARTBEAT_MS);
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled || terminal) return;
+      const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** attempt);
+      attempt += 1;
+      // Jitter matters here: one redeploy drops every socket at once, and
+      // without it every client in every meeting comes back in lockstep and
+      // hits the new instance as a thundering herd.
+      const delay = backoff * (0.5 + Math.random());
+      setStatus("reconnecting");
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    function connect() {
+      if (cancelled || terminal) return;
+      retryTimer = null;
+      const ws = new WebSocket(socketUrl());
+      socket = ws;
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (cancelled || socket !== ws) {
+          ws.close();
+          return;
+        }
+        attempt = 0;
+        setStatus("live");
+        startHeartbeat();
+        // The instance we just landed on rebuilt our presence from the query
+        // string, which carries mic and camera but not these two - so without
+        // re-announcing them a raised hand silently drops and, worse, a live
+        // screenshare becomes invisible to everyone else.
+        if (handRaisedRef.current) send({ type: "hand", raised: true });
+        if (sharingRef.current && screenStreamRef.current) {
+          send({ type: "share", on: true, streamId: screenStreamRef.current.id });
+        }
+      };
+
+      ws.onmessage = onMessage;
+      // A failed connection always produces a close event too, so recovery is
+      // driven from one place rather than two.
+      ws.onerror = () => {};
+
+      ws.onclose = (event) => {
+        if (socket !== ws) return; // already replaced; its own handler owns it
+        clearTimers();
+        if (cancelled) return;
+        if (TERMINAL_CLOSE_CODES.has(event.code)) {
+          terminal = true;
+          setStatus("error");
+          return;
+        }
+        // Signalling carries offers, answers, candidates and ICE restarts, so
+        // once it is gone every peer connection is unmanageable even if its
+        // media is momentarily still flowing. Rebuilding on the new socket is
+        // deterministic; keeping them alive and hoping invites glare, because
+        // the far end may have torn its own down on a different schedule.
+        closePeers();
+        setPeers([]);
+        scheduleRetry();
+      };
+    }
+
+    // Waking from sleep or regaining a network is information: act on it
+    // instead of sitting out the rest of a backoff.
+    const wake = () => {
+      if (cancelled || terminal) return;
+      if (socket && socket.readyState === WebSocket.CONNECTING) return;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        // It may only look open. Probe, and hold it to a short deadline
+        // rather than the full heartbeat interval.
+        ping();
+        if (probeTimer) clearTimeout(probeTimer);
+        probeTimer = setTimeout(() => {
+          if (awaitingPong && socket && socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+        }, PONG_GRACE_MS);
+        return;
+      }
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      attempt = 0;
+      connect();
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") wake();
+    };
+
     // The relay list must be in hand before the first RTCPeerConnection is
     // constructed - a peer connection cannot be given ICE servers after the
     // fact - so the socket waits on it. One fetch per page load, cached.
     void (async () => {
       iceConfigRef.current = await fetchIceConfig();
       if (cancelled) return;
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-      ws.onopen = () => !cancelled && setStatus("live");
-      ws.onerror = () => !cancelled && setStatus("error");
-      ws.onmessage = onMessage;
+      connect();
     })();
+
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
-      wsRef.current?.close();
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearTimers();
+      const closing = socket;
+      socket = null;
+      closing?.close();
       wsRef.current = null;
-      pcsRef.current.forEach((box) => box.pc.close());
-      pcsRef.current.clear();
+      closePeers();
       screenTrackRef.current?.stop();
       startedRef.current = false;
     };
