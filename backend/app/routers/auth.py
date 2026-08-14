@@ -101,6 +101,17 @@ def resend_signup_otp(data: schemas.ResendOtpRequest, db: Session = Depends(get_
 def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_db)):
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
+        # A successful verify deletes the pending row, so a duplicate
+        # submission - a double-tapped button, a retried request whose first
+        # response was lost - used to come back as "start again" even though
+        # the account had just been created. The code itself cannot be
+        # re-checked (its hash went with the row), so this is not a replayed
+        # success; it is at least an honest answer about what happened.
+        if crud.get_user_by_email(db, data.email):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This email is already verified. Please log in.",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No pending signup found. Please start again.",

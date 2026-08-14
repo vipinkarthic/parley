@@ -67,6 +67,11 @@ export default function SignupPage() {
   };
 
   const resend = async () => {
+    // Unguarded, a double tap sent two requests and burned two of the five
+    // OTP slots the rate limiter allows per ten minutes - so the second tap
+    // brought the user closer to being locked out of their own signup.
+    if (submitting) return;
+    setSubmitting(true);
     setError(null);
     try {
       const res = await api.resendSignupOtp(email.trim());
@@ -74,6 +79,8 @@ export default function SignupPage() {
       setInfo(res.email_sent ? "A new code is on its way." : "New dev code below.");
     } catch {
       setError("Could not resend the code.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -211,7 +218,11 @@ export default function SignupPage() {
                 >
                   ← Change details
                 </button>
-                <button onClick={resend} className="font-medium text-parley-brand hover:underline">
+                <button
+                  onClick={resend}
+                  disabled={submitting}
+                  className="font-medium text-parley-brand hover:underline disabled:opacity-50"
+                >
                   Resend code
                 </button>
               </div>

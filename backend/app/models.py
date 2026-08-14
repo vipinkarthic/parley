@@ -21,6 +21,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -144,7 +145,18 @@ class Participant(Base):
     admission: Mapped[str] = mapped_column(String(12), default="admitted")
     # secret the client sends back on the socket - peers only see the numeric id so nobody can fake being the host
     ws_token: Mapped[str] = mapped_column(String(40), default="")
+    # Idempotency key for POST /join. A join whose response is lost in flight
+    # (flaky mobile network, a proxy timing out during a cold start) used to
+    # create a second participant row on retry, leaving the first as a ghost
+    # tile nobody could remove. Replaying the same key returns the original
+    # row instead. Nullable: a client that sends no key still joins normally,
+    # and NULLs do not collide under the unique constraint.
+    join_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     joined_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="participants")
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "join_key", name="uq_participants_join_key"),
+    )

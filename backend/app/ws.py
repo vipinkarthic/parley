@@ -17,6 +17,16 @@ from .database import SessionLocal
 
 router = APIRouter()
 
+# Application close codes. The 4000-4999 range is reserved for the application
+# by the WebSocket spec. The client's reconnect logic keys off these: 4001,
+# 4003, 4004 and 4005 are final for the meeting and must not be retried, while
+# 4009 means "this socket was replaced" and the newer socket carries on.
+WS_BAD_PID = 4001
+WS_UNAUTHORISED = 4003
+WS_DENIED = 4004
+WS_MEETING_ENDED = 4005
+WS_SUPERSEDED = 4009
+
 
 SETTING_KEYS = (
     "waiting_room", "locked", "mute_on_entry", "join_before_host",
@@ -43,6 +53,24 @@ class Hub:
             del room[pid]
             if not room:
                 self.rooms.pop(number, None)
+
+    def entry(self, number: str, pid: int) -> dict | None:
+        """This participant's live socket entry, in the room or the lobby."""
+        return (
+            self.rooms.get(number, {}).get(pid)
+            or self.lobbies.get(number, {}).get(pid)
+        )
+
+    def owns(self, number: str, pid: int, ws: WebSocket) -> bool:
+        """Whether `ws` is still the socket registered for this participant.
+
+        Both dicts are keyed by participant id, so a reconnect that arrives
+        before the old socket's close is processed replaces the entry. Without
+        this check the displaced socket's teardown would announce peer-left and
+        deactivate the row out from under the connection that is actually live.
+        """
+        entry = self.entry(number, pid)
+        return entry is not None and entry["ws"] is ws
 
     def peers(self, number: str, exclude: int) -> list[dict]:
         return [p["info"] for pid, p in self.rooms.get(number, {}).items() if pid != exclude]
@@ -151,6 +179,44 @@ def _deactivate(meeting_id: str, pid: int) -> None:
         db.close()
 
 
+def _reactivate(meeting_id: str, pid: int) -> None:
+    """Undo the deactivation a dropped socket performed.
+
+    Every disconnect marks the participant inactive, and both `host_present`
+    and `active_participant_count` read that flag - so without this a
+    reconnecting participant comes back invisible to the API, and a
+    reconnecting host leaves the waiting room believing nobody is hosting.
+    """
+    db = SessionLocal()
+    try:
+        p = db.get(models.Participant, pid)
+        if p and p.meeting_id == meeting_id:
+            crud.reactivate_participant(db, p)
+    finally:
+        db.close()
+
+
+async def _evict_existing_socket(number: str, pid: int, keep: WebSocket) -> None:
+    """Make room for a reconnecting participant by closing their old socket.
+
+    One participant, one socket. A reconnect regularly arrives before the old
+    socket's close has been processed - a laptop waking, a redeploy - and both
+    hub dicts are keyed by participant id, so the newcomer would silently
+    displace the old entry and leave a zombie handler behind. Evicting it here,
+    deliberately and with a distinct code, is what makes the displacement
+    visible instead of a race.
+    """
+    stale = hub.entry(number, pid)
+    if stale is None or stale["ws"] is keep:
+        return
+    hub.remove_room(number, pid)
+    hub.remove_lobby(number, pid)
+    try:
+        await stale["ws"].close(code=WS_SUPERSEDED)
+    except Exception:
+        pass
+
+
 def _end_meeting(meeting_id: str) -> None:
     db = SessionLocal()
     try:
@@ -183,7 +249,7 @@ async def meeting_socket(websocket: WebSocket, number: str):
     try:
         pid = int(params.get("pid", ""))
     except (TypeError, ValueError):
-        await websocket.close(code=4001)
+        await websocket.close(code=WS_BAD_PID)
         return
 
     token = params.get("token", "")
@@ -194,7 +260,18 @@ async def meeting_socket(websocket: WebSocket, number: str):
             crud.get_participant_by_token(db, meeting.id, pid, token) if meeting else None
         )
         if meeting is None or participant is None:
-            await websocket.close(code=4003)
+            await websocket.close(code=WS_UNAUTHORISED)
+            return
+        # Terminal states get their own codes so the client stops retrying.
+        # This matters now that the client reconnects on its own: a denied
+        # guest still holds a valid ws_token, and `admission == "denied"` is
+        # not "waiting", so a reconnect would otherwise have walked them
+        # straight into the room the host just refused them.
+        if participant.admission == "denied":
+            await websocket.close(code=WS_DENIED)
+            return
+        if meeting.status == "ended":
+            await websocket.close(code=WS_MEETING_ENDED)
             return
         meeting_id = meeting.id
         admission = participant.admission
@@ -208,6 +285,11 @@ async def meeting_socket(websocket: WebSocket, number: str):
         }
     finally:
         db.close()
+
+    # A reconnect reuses the participant row, so the flag the dropped socket
+    # cleared has to be put back before anyone reads presence off it.
+    _reactivate(meeting_id, pid)
+    await _evict_existing_socket(number, pid, websocket)
 
     waiting = admission == "waiting"
 
@@ -364,13 +446,20 @@ async def meeting_socket(websocket: WebSocket, number: str):
     except Exception:
         pass
     finally:
-        if pid in hub.rooms.get(number, {}):
-            was_host = info.get("isHost")
-            hub.remove_room(number, pid)
-            await hub.broadcast(number, {"type": "peer-left", "id": pid})
-            if was_host and not hub.host_pids(number):
-                await hub.broadcast_lobby(number, {"type": "host-present", "present": False})
-        elif pid in hub.lobbies.get(number, {}):
-            hub.remove_lobby(number, pid)
-            await hub.notify_hosts_waiting(number)
-        _deactivate(meeting_id, pid)
+        # Only tear down if this socket still owns the participant slot. If a
+        # reconnect displaced us, the live socket is already registered under
+        # this id - announcing peer-left or deactivating the row here would
+        # knock out the connection that replaced us.
+        if hub.owns(number, pid, websocket):
+            if pid in hub.rooms.get(number, {}):
+                was_host = info.get("isHost")
+                hub.remove_room(number, pid)
+                await hub.broadcast(number, {"type": "peer-left", "id": pid})
+                if was_host and not hub.host_pids(number):
+                    await hub.broadcast_lobby(
+                        number, {"type": "host-present", "present": False}
+                    )
+            elif pid in hub.lobbies.get(number, {}):
+                hub.remove_lobby(number, pid)
+                await hub.notify_hosts_waiting(number)
+            _deactivate(meeting_id, pid)

@@ -331,6 +331,7 @@ def add_participant(
     is_host: bool = False,
     user_id: int | None = None,
     admission: str = "admitted",
+    join_key: str | None = None,
 ) -> models.Participant:
     participant = models.Participant(
         meeting_id=meeting.id,
@@ -339,6 +340,7 @@ def add_participant(
         user_id=user_id,
         admission=admission,
         ws_token=uuid.uuid4().hex,
+        join_key=join_key,
     )
     db.add(participant)
     db.commit()
@@ -430,6 +432,42 @@ def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> No
         r.is_active = False
     if rows:
         db.commit()
+
+
+def get_participant_by_join_key(
+    db: Session, meeting_id: str, join_key: str
+) -> models.Participant | None:
+    """The participant a previous join with this key created, if any.
+
+    This is what makes POST /join idempotent: a retry after a lost response
+    finds the row the first call committed instead of creating a second one.
+    """
+    return (
+        db.query(models.Participant)
+        .filter(
+            models.Participant.meeting_id == meeting_id,
+            models.Participant.join_key == join_key,
+        )
+        .first()
+    )
+
+
+def reactivate_participant(
+    db: Session, participant: models.Participant
+) -> models.Participant:
+    """Mark a participant active again without minting a new row.
+
+    A dropped socket deactivates the participant, and `host_present` and
+    `active_participant_count` both read `is_active` - so a reconnecting
+    participant that came back as an inactive row would be invisible to the
+    API and, if they were the host, would leave the waiting room believing
+    the host had left.
+    """
+    if not participant.is_active:
+        participant.is_active = True
+        db.commit()
+        db.refresh(participant)
+    return participant
 
 
 def get_participant_by_token(

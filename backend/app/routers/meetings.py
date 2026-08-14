@@ -1,5 +1,5 @@
 """Meeting + participant API routes."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -153,6 +153,23 @@ def update_meeting_settings(
     return meeting_out(db, updated, user.id)
 
 
+def _join_out(
+    participant: models.Participant, is_meeting_host: bool
+) -> schemas.ParticipantJoinOut:
+    return schemas.ParticipantJoinOut(
+        id=participant.id,
+        display_name=participant.display_name,
+        is_host=participant.is_host,
+        is_muted=participant.is_muted,
+        is_video_on=participant.is_video_on,
+        is_active=participant.is_active,
+        joined_at=participant.joined_at,
+        ws_token=participant.ws_token,
+        is_meeting_host=is_meeting_host,
+        admission=participant.admission,
+    )
+
+
 @router.post(
     "/meetings/{meeting_number}/join",
     response_model=schemas.ParticipantJoinOut,
@@ -163,6 +180,7 @@ def join_meeting(
     data: schemas.ParticipantJoin,
     db: Session = Depends(get_db),
     user: models.User | None = Depends(get_optional_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     meeting = _require_meeting(db, meeting_number)
     if meeting.status == "ended":
@@ -171,6 +189,19 @@ def join_meeting(
             detail="This meeting has already ended.",
         )
     is_owner = user is not None and user.id == meeting.host_id
+
+    # Replay before any admission gate: a key is only ever known to whoever
+    # already made a successful join with it, so this returns what happened
+    # rather than deciding admission a second time. Re-running the gates would
+    # mean a retry could be refused for a passcode or lock that changed after
+    # the participant was already in the room. The "ended" check above still
+    # bites, because a meeting that is over cannot be rejoined.
+    join_key = (idempotency_key or "").strip()[:64] or None
+    if join_key:
+        replayed = crud.get_participant_by_join_key(db, meeting.id, join_key)
+        if replayed is not None:
+            crud.reactivate_participant(db, replayed)
+            return _join_out(replayed, is_meeting_host=is_owner)
 
     if not is_owner and (data.passcode or "").strip() != meeting.passcode:
         raise HTTPException(
@@ -227,19 +258,9 @@ def join_meeting(
         is_host=is_host,
         user_id=user.id if user else None,
         admission=admission,
+        join_key=join_key,
     )
     if meeting.mute_on_entry and not is_owner:
         participant.is_muted = True
         db.commit()
-    return schemas.ParticipantJoinOut(
-        id=participant.id,
-        display_name=participant.display_name,
-        is_host=participant.is_host,
-        is_muted=participant.is_muted,
-        is_video_on=participant.is_video_on,
-        is_active=participant.is_active,
-        joined_at=participant.joined_at,
-        ws_token=participant.ws_token,
-        is_meeting_host=is_owner,
-        admission=participant.admission,
-    )
+    return _join_out(participant, is_meeting_host=is_owner)

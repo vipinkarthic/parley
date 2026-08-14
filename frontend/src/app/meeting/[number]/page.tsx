@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, newJoinKey } from "@/lib/api";
 import type { JoinResult, Meeting, Preferences } from "@/lib/types";
 import { useMeeting } from "@/lib/useMeeting";
 import { VideoTile } from "@/components/meeting/VideoTile";
@@ -50,6 +50,11 @@ export default function MeetingRoomPage() {
   const [joined, setJoined] = useState<JoinedState | null>(null);
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // One key per attempt at joining this page's meeting, held across retries
+  // and rotated once a join succeeds. A retry after a lost response then
+  // replays onto the participant the first attempt created rather than
+  // minting a second one.
+  const joinKeyRef = useRef<string>("");
 
   const pwd = search.get("pwd") || "";
 
@@ -112,7 +117,9 @@ export default function MeetingRoomPage() {
     setJoinError(null);
     try {
       const passcode = meeting?.passcode || pwd || o.passcode;
-      const join = await api.join(number, o.name, passcode);
+      if (!joinKeyRef.current) joinKeyRef.current = newJoinKey();
+      const join = await api.join(number, o.name, passcode, joinKeyRef.current);
+      joinKeyRef.current = "";
       streamRef.current = o.stream;
       setJoined({ join, name: join.display_name, stream: o.stream, micOn: o.micOn, camOn: o.camOn });
       setPhase("in");

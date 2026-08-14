@@ -164,10 +164,19 @@ export const api = {
       method: "DELETE",
     }),
 
-  join: (number: string, displayName: string, passcode?: string) =>
+  // idempotencyKey makes a retry safe: if the first attempt reached the server
+  // but its response did not reach us, replaying the same key returns that
+  // participant instead of creating a second one.
+  join: (
+    number: string,
+    displayName: string,
+    passcode?: string,
+    idempotencyKey?: string
+  ) =>
     request<JoinResult>(`/api/meetings/${encodeURIComponent(number)}/join`, {
       method: "POST",
       body: JSON.stringify({ display_name: displayName, passcode: passcode ?? null }),
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
     }),
 
   endMeeting: (number: string) =>
@@ -175,6 +184,24 @@ export const api = {
       method: "POST",
     }),
 };
+
+// A fresh idempotency key for one join attempt.
+//
+// crypto.randomUUID only exists in a secure context, and local development
+// runs on http://<tailnet-ip>:3100, which is not one - so it would be
+// undefined on exactly the setup used to test this. Falls back to
+// getRandomValues, then to a timestamp, because a slightly weaker key still
+// deduplicates a retry and a crash here would block joining entirely.
+export function newJoinKey(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  if (typeof c?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    c.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // --- ICE configuration ----------------------------------------------------
 // The relay credentials come from the API instead of NEXT_PUBLIC_*, which is
