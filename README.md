@@ -130,8 +130,9 @@ real ceiling, and it is a client-side one. See **Known limits**.
 parley/
 ├── backend/                      # FastAPI + Postgres API
 │   ├── app/
-│   │   ├── main.py               # App entrypoint, CORS, startup
+│   │   ├── main.py               # App entrypoint, CORS, request ids, health, SIGTERM drain
 │   │   ├── config.py             # Env-driven config
+│   │   ├── logging_setup.py      # Structured logs + the request-id context
 │   │   ├── database.py           # Engine (pooled, pre-ping), session, declarative base
 │   │   ├── dbtypes.py            # UtcDateTime: timezone-aware UTC columns
 │   │   ├── models.py             # SQLAlchemy models (User, Meeting, Participant, PendingSignup)
@@ -148,7 +149,10 @@ parley/
 │   │   └── routers/
 │   │       ├── auth.py           # Signup (OTP), login, change password, current user
 │   │       ├── meetings.py       # Meeting + participant + join endpoints
+│   │       ├── ice.py            # STUN/TURN list for the browser
 │   │       └── users.py          # Contacts, profile, preferences
+│   ├── alembic/                  # Migration history (Alembic owns the schema)
+│   ├── tests/                    # pytest; runs on SQLite or Postgres unchanged
 │   ├── requirements.txt
 │   ├── Procfile                  # Backend start command (Render / Railway)
 │   └── .env.example
@@ -167,9 +171,9 @@ parley/
 │       │   └── meeting/[number]/page.tsx # Live meeting room + pre-join
 │       ├── components/                   # Navbar, AuthShell, modals, meeting UI, tiles
 │       └── lib/
-│           ├── api.ts                    # Fetch-based API client (+ JWT)
+│           ├── api.ts                    # Fetch-based API client (+ JWT, ICE config)
 │           ├── auth.tsx                  # Auth context/provider
-│           └── useMeeting.ts             # WebRTC mesh + signalling hook
+│           └── useMeeting.ts             # WebRTC mesh + signalling, with reconnect
 │
 ├── docs/screenshots/             # README images
 ├── render.yaml                   # Render blueprint (builds from backend/)
@@ -376,9 +380,21 @@ you're in.
 | `SMTP_FROM_NAME`   | `Parley`                             | Display name on OTP emails                       |
 | `SMTP_TIMEOUT`     | `15`                                 | SMTP socket timeout (seconds)                    |
 | `OTP_TTL_MINUTES`  | `10`                                 | OTP validity window                              |
+| `STUN_URLS`        | two Google STUN servers              | Comma-separated STUN URLs served by `GET /api/ice` |
+| `TURN_URLS`        | Open Relay (`:80`, `:443`, `turns:`) | Comma-separated TURN URLs - the relay path        |
+| `TURN_USERNAME`    | `openrelayproject`                   | TURN username; replace for a dedicated account   |
+| `TURN_CREDENTIAL`  | `openrelayproject`                   | TURN credential; replace for a dedicated account  |
+| `ICE_CANDIDATE_POOL_SIZE` | `2`                           | Candidates pre-gathered per peer connection      |
+| `LOG_FORMAT`       | `json` in production, else `text`    | `json` emits one object per line                 |
+| `LOG_LEVEL`        | `INFO`                               | Root log level                                   |
 
 Real email needs **both** `SMTP_USER` and `SMTP_PASS`; with either missing the
 app stays in dev-mode OTP rather than failing at send time.
+
+The TURN defaults are Open Relay's **public shared** credentials, so a fresh
+checkout has a working relay with no signup. They are not secrets - the ICE
+list is served to the browser by design, and anything the browser holds is
+extractable. Point them at a dedicated account before relying on the relay.
 
 **Frontend** (`frontend/.env.local`)
 
@@ -413,8 +429,18 @@ routes require a Bearer token except `GET /api/meetings/{number}` and
 In-meeting participant controls (mute/remove/spotlight/...) run over the
 authenticated WebSocket, not REST.
 
+Every response carries an `X-Request-ID`, echoing an inbound one if present so
+a trace survives a proxy. `POST /api/meetings/{number}/join` accepts an
+`Idempotency-Key` header: replaying a key returns the participant the first
+call created rather than a second one, which is what makes a retry after a
+lost response safe.
+
 | Method   | Endpoint                              | Description                                  |
 | -------- | ------------------------------------- | -------------------------------------------- |
+| `GET`    | `/`                                   | Liveness (the deployed health check target)  |
+| `GET`    | `/healthz`                            | Liveness - **never touches the database**    |
+| `GET`    | `/readyz`                             | Readiness incl. a database probe; 503 if down |
+| `GET`    | `/api/ice`                            | STUN/TURN list for `new RTCPeerConnection`   |
 | `POST`   | `/auth/signup/request-otp`            | Start signup: email a 6-digit OTP            |
 | `POST`   | `/auth/signup/resend-otp`             | Resend the signup OTP                        |
 | `POST`   | `/auth/signup/verify`                 | Verify OTP -> create account + token         |
@@ -432,7 +458,7 @@ authenticated WebSocket, not REST.
 | `DELETE` | `/api/meetings/{number}`              | Delete a meeting (host)                      |
 | `PATCH`  | `/api/meetings/{number}/settings`     | Update host settings/permissions (host)      |
 | `POST`   | `/api/meetings/{number}/end`          | End a meeting (host)                         |
-| `POST`   | `/api/meetings/{number}/join`         | Join (guests allowed; creates a participant) |
+| `POST`   | `/api/meetings/{number}/join`         | Join (guests allowed; honours `Idempotency-Key`) |
 | `GET`    | `/api/contacts`                       | Registered users (for the future directory)  |
 | `PATCH`  | `/api/profile`                        | Update name / avatar colour / photo          |
 | `GET`    | `/api/preferences`                    | Read saved preferences                       |
@@ -450,21 +476,41 @@ Deliberate, and stated rather than papered over.
   and CPU grow with the square of the room. Small groups are the design target.
   **The exact ceiling has not been measured yet** - no number is claimed here
   until it has been.
-- **No TURN server.** Only Google's public STUN is configured. Peers behind
-  symmetric NAT or a restrictive corporate firewall **cannot connect at all**,
-  and will sit on a failed connection rather than degrading. This is a gap, not
-  a trade-off.
+- **Shared public TURN relay.** A relay is configured, so peers behind
+  symmetric NAT or a corporate firewall do connect. It defaults to Open Relay's
+  public shared credentials, which have no quota guarantee - set `TURN_URLS`,
+  `TURN_USERNAME` and `TURN_CREDENTIAL` to a dedicated account for anything
+  that matters. Relayed media also costs latency and someone else's bandwidth,
+  so it is the fallback path, not the normal one.
 - **Single backend instance.** Room membership for signalling lives in process,
   so two instances would not see each other's rooms. Intentional at this scale -
   a meeting is a few hundred messages - but it means the backend does not scale
-  horizontally today.
-- **No WebSocket reconnect.** A dropped socket (laptop sleeping, a redeploy,
-  a network switch) ends that participant's meeting; there is no backoff and
-  resume.
-- **Blocking OTP send.** Signup waits on the SMTP round trip, so signup latency
-  is the mail provider's latency, and an SMTP outage fails signup.
-- **Free-tier cold starts.** The hosted backend spins down when idle, so the
-  first request after a quiet period can take 30-60 seconds.
+  horizontally today. A redeploy therefore ends every meeting on the instance;
+  what makes that survivable is that clients reconnect, not that state moves.
+- **Reconnect rebuilds media.** A dropped socket now resumes into room state
+  with backoff, but peer connections are torn down and rebuilt rather than
+  preserved, so a reconnect costs a second or two of video. Deliberate:
+  signalling carries renegotiation, so a peer connection outliving its socket
+  is unmanageable, and the far end may have rebuilt on a different schedule.
+- **Heartbeat detection is not instant.** A half-open socket - what a slept
+  laptop leaves behind - is detected by an unanswered 20s ping, so worst case
+  is roughly that before recovery starts. A tab regaining focus or the network
+  coming back short-circuits the wait.
+- **OTP delivery is fire-and-forget.** Signup no longer waits on SMTP and an
+  outage no longer fails signup, but the flip side is that a delivery failure
+  cannot be reported in the response. It is logged, and the user's recourse is
+  the resend button.
+- **Free-tier cold starts.** The hosted backend spins down after ~15 minutes
+  idle, and a cold start measured 15.4 seconds. A keepalive on a machine that
+  is always up pings `/healthz` every ten minutes between 09:00 and 21:00 IST,
+  which is a quota decision: Render allows 750 instance-hours a month against a
+  ~730-hour month, so round-the-clock pinging would consume the whole
+  allowance. Outside that window the first request still pays for the cold
+  start.
+- **Rate limiting is per-process.** The auth limiter is an in-memory
+  fixed window, so it resets on restart and would not be shared across
+  instances. It meaningfully slows brute force at one instance, which is what
+  there is.
 
 ---
 
@@ -499,3 +545,24 @@ build `pip install -r requirements.txt`, start
 `JWT_SECRET`, and `SMTP_USER` + `SMTP_PASS` for real email. The frontend derives
 the signalling URL from `NEXT_PUBLIC_API_BASE` (`https` -> `wss`), so an HTTPS
 backend works out of the box.
+
+Alembic owns the schema, so migrations have to run before the server does -
+`render.yaml`'s start command is `alembic upgrade head && uvicorn ...`. The app
+checks its tables exist and refuses to boot with a message naming the fix,
+rather than creating them itself and letting the live schema drift away from
+the migration history.
+
+**Health checks.** Point the platform's check at `/healthz`, which is liveness
+only. `/readyz` also probes the database and is the wrong target for a health
+check on a free-tier Postgres: a database blip would fail the check and take
+the API down with it.
+
+**Keeping a free instance warm.** A free web service spins down after ~15
+minutes idle; a cold start here measured 15.4 seconds. `rte`'s `parley-ping`
+server on `tle-machine` pings `/healthz` every ten minutes between 09:00 and
+21:00 IST. The window is a quota decision - Render allows 750 instance-hours a
+month and a month is ~730 hours, so pinging around the clock would spend the
+whole allowance on one service. It targets `/healthz` specifically because
+Neon meters compute-hours and sleeps after ~5 minutes idle, so a ping that
+opened a database connection would burn the database's allowance to keep the
+web service's warm.
