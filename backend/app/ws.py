@@ -8,6 +8,7 @@ The server only relays signalling; browsers do the media. Host status and
 admission are decided server-side (from the DB via a per-participant token),
 so nothing can be spoofed from the client.
 """
+import asyncio
 import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -39,6 +40,24 @@ SETTING_KEYS = (
 )
 
 
+async def _fan_out(coros) -> None:
+    """Await many independent sends together.
+
+    `return_exceptions=True` because these coroutines are already
+    individually guarded; the flag is there so that a cancellation or a
+    surprise from one socket cannot leave the rest un-awaited, which would
+    surface later as "coroutine was never awaited".
+    """
+    await asyncio.gather(*coros, return_exceptions=True)
+
+
+async def _close_quietly(ws: WebSocket, code: int) -> None:
+    try:
+        await ws.close(code=code)
+    except Exception:
+        pass
+
+
 class Hub:
     def __init__(self) -> None:
         self.rooms: dict[str, dict[int, dict]] = {}
@@ -59,6 +78,10 @@ class Hub:
 
         Materialises the list first: closing a socket runs its handler's
         teardown, which mutates the dicts being walked.
+
+        Closed concurrently for the same reason broadcasts are. Render SIGKILLs
+        thirty seconds after SIGTERM, and one unresponsive socket must not eat
+        that budget on behalf of everyone still waiting to be told to reconnect.
         """
         entries = [
             entry
@@ -66,11 +89,7 @@ class Hub:
             for space in list(group.values())
             for entry in list(space.values())
         ]
-        for entry in entries:
-            try:
-                await entry["ws"].close(code=code)
-            except Exception:
-                pass
+        await _fan_out(_close_quietly(entry["ws"], code) for entry in entries)
         self.rooms.clear()
         self.lobbies.clear()
 
@@ -133,8 +152,18 @@ class Hub:
         return list(self.lobbies.get(number, {}).values())
 
     async def send(self, ws: WebSocket, message: dict) -> None:
+        await self._send_text(ws, json.dumps(message))
+
+    @staticmethod
+    async def _send_text(ws: WebSocket, text: str) -> None:
+        """A send that cannot fail the caller.
+
+        A socket that has gone away must not abort a fan-out that is still
+        delivering to everyone else - and its handler's own teardown is what
+        removes it from the room, not this.
+        """
         try:
-            await ws.send_text(json.dumps(message))
+            await ws.send_text(text)
         except Exception:
             pass
 
@@ -144,18 +173,45 @@ class Hub:
             await self.send(peer["ws"], message)
 
     async def broadcast(self, number: str, message: dict, exclude: int | None = None) -> None:
-        for pid, peer in list(self.rooms.get(number, {}).items()):
-            if pid != exclude:
-                await self.send(peer["ws"], message)
+        """Fan a message out to the room, concurrently.
+
+        Awaiting each send in turn makes the slowest receiver everyone else's
+        problem: a peer whose transport buffer is full holds up every peer
+        positioned after it in the dict, for as long as its own send takes.
+        The room is small, so the cost of the sequential version is not the
+        total work - it is the head-of-line blocking, and it lands on the
+        participants who did nothing wrong.
+
+        The payload is serialised once here rather than once per recipient.
+        """
+        peers = [
+            peer["ws"]
+            for pid, peer in self.rooms.get(number, {}).items()
+            if pid != exclude
+        ]
+        await self._send_many(peers, message)
 
     async def broadcast_lobby(self, number: str, message: dict) -> None:
-        for p in list(self.lobbies.get(number, {}).values()):
-            await self.send(p["ws"], message)
+        sockets = [p["ws"] for p in self.lobbies.get(number, {}).values()]
+        await self._send_many(sockets, message)
 
     async def notify_hosts_waiting(self, number: str) -> None:
         msg = {"type": "waiting-list", "waiting": self.waiting_list(number)}
-        for hpid in self.host_pids(number):
-            await self.send_to(number, hpid, msg)
+        room = self.rooms.get(number, {})
+        hosts = [
+            room[hpid]["ws"] for hpid in self.host_pids(number) if hpid in room
+        ]
+        await self._send_many(hosts, msg)
+
+    async def _send_many(self, sockets: list, message: dict) -> None:
+        """Send one already-known message to many sockets at once."""
+        if not sockets:
+            return
+        text = json.dumps(message)
+        if len(sockets) == 1:
+            await self._send_text(sockets[0], text)
+            return
+        await _fan_out(self._send_text(ws, text) for ws in sockets)
 
 
 hub = Hub()
@@ -244,10 +300,7 @@ async def _evict_existing_socket(number: str, pid: int, keep: WebSocket) -> None
         return
     hub.remove_room(number, pid)
     hub.remove_lobby(number, pid)
-    try:
-        await stale["ws"].close(code=WS_SUPERSEDED)
-    except Exception:
-        pass
+    await _close_quietly(stale["ws"], WS_SUPERSEDED)
 
 
 def _end_meeting(meeting_id: str) -> None:
