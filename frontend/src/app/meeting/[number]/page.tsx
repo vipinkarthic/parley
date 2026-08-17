@@ -263,6 +263,11 @@ function LiveRoom({
   const isHost = joined.join.is_host;
   const myId = joined.join.id;
 
+  // Declared above useMeeting because the hook needs it: a pinned peer is
+  // always subscribed to, which is what keeps that one sender's upstream
+  // alive even when the active-speaker ranking would have dropped them.
+  const [pinnedId, setPinnedId] = useState<number | "me" | null>(null);
+
   const m = useMeeting({
     number,
     participantId: myId,
@@ -274,6 +279,7 @@ function LiveRoom({
     initialCamOn: joined.camOn,
     initialAdmission: joined.join.admission,
     initialSettings: meeting.settings,
+    pinnedId,
     onRemoved: () => onExit("removed"),
     onEnded: () => onExit("ended"),
     onDenied: () => onExit("denied"),
@@ -293,7 +299,6 @@ function LiveRoom({
 
   const [panel, setPanel] = useState<Panel>(null);
   const [view, setView] = useState<"gallery" | "speaker">("gallery");
-  const [pinnedId, setPinnedId] = useState<number | "me" | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [copied, setCopied] = useState(false);
 

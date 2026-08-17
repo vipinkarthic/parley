@@ -41,6 +41,9 @@ interface PeerBox {
   streams: Map<string, MediaStream>;
   screenSid: string | null;
   screenSender: RTCRtpSender | null;
+  // The sender carrying our camera to this one peer. Paging works by
+  // swapping the track on it, never by touching the transceiver.
+  cameraSender: RTCRtpSender | null;
 }
 
 // Used only until GET /api/ice answers. STUN alone cannot relay media, so a
@@ -98,6 +101,53 @@ const HEARTBEAT_MS = 20_000;
 // How long a probe ping gets before the socket is declared dead.
 const PONG_GRACE_MS = 5_000;
 
+// --- Active-speaker paging and encoder caps (Phase 4) ----------------------
+//
+// A mesh makes every participant upload one copy of their video per other
+// participant, so the room's cost is O(n^2) and it is paid by the clients.
+// Paging cuts most of those edges: you only send your camera to the people
+// who currently have a reason to see it.
+
+// How often we look at our own microphone. Cheap - one FFT read.
+const LEVEL_SAMPLE_MS = 150;
+// Two thresholds, not one. A single threshold makes a voice sitting right on
+// it chatter on and off several times a second, and every one of those is a
+// message and possibly a track swap.
+const SPEAKING_ENTER = 18;
+const SPEAKING_RELEASE = 12;
+// Never report more often than this, even mid-sentence.
+const SPEAKING_REPORT_MIN_MS = 300;
+// While still speaking, refresh at this rate so the server has a live level
+// to rank by and can time us out if our "stopped" message is lost.
+const SPEAKING_REFRESH_MS = 1_000;
+
+// How many remote cameras this client subscribes to at once. Pins, the
+// spotlight and anyone screensharing are additional to this, never counted
+// against it - dropping the video of the person you deliberately pinned in
+// order to honour a budget would be the wrong trade.
+const DEFAULT_VIDEO_BUDGET = 5;
+
+// Encoder caps, keyed on how many peers currently want our camera. Sending
+// the same 1.2Mbps stream to seven people is 8.4Mbps of uplink, which is
+// more than most home connections have; the ladder is what keeps a large
+// room inside a small pipe.
+const ENCODER_TIERS: {
+  upTo: number;
+  maxBitrate: number;
+  scaleResolutionDownBy: number;
+  maxFramerate: number;
+}[] = [
+  { upTo: 1, maxBitrate: 1_200_000, scaleResolutionDownBy: 1, maxFramerate: 30 },
+  { upTo: 3, maxBitrate: 600_000, scaleResolutionDownBy: 1.5, maxFramerate: 24 },
+  { upTo: 6, maxBitrate: 350_000, scaleResolutionDownBy: 2, maxFramerate: 20 },
+  {
+    upTo: Number.POSITIVE_INFINITY,
+    maxBitrate: 200_000,
+    scaleResolutionDownBy: 3,
+    maxFramerate: 15,
+  },
+];
+
 // Close codes the client must not retry: the participant is not coming back
 // into this meeting, so retrying would be an infinite loop against a server
 // that is answering correctly. See the matching constants in ws.py.
@@ -106,6 +156,7 @@ const TERMINAL_CLOSE_CODES = new Set([
   4003, // token rejected
   4004, // the host denied this guest
   4005, // the meeting has ended
+  4006, // the room is full
 ]);
 
 export interface UseMeetingOptions {
@@ -119,6 +170,13 @@ export interface UseMeetingOptions {
   initialCamOn: boolean;
   initialAdmission?: "admitted" | "waiting";
   initialSettings?: MeetingSettings;
+  // How many remote cameras to subscribe to. The server enforces the room
+  // cap; this is only about what this client asks to receive.
+  videoBudget?: number;
+  // Whoever this client has pinned. Pinned peers are always subscribed, and
+  // a pin is what keeps one sender's upstream alive even when nobody else
+  // wants it.
+  pinnedId?: number | "me" | null;
   onRemoved?: () => void;
   onEnded?: () => void;
   onDenied?: () => void;
@@ -137,6 +195,8 @@ export function useMeeting(opts: UseMeetingOptions) {
     initialCamOn,
     initialAdmission = "admitted",
     initialSettings = DEFAULT_SETTINGS,
+    videoBudget = DEFAULT_VIDEO_BUDGET,
+    pinnedId = null,
     onRemoved,
     onEnded,
     onDenied,
@@ -175,6 +235,21 @@ export function useMeeting(opts: UseMeetingOptions) {
   const sharingRef = useRef(false);
   const handRaisedRef = useRef(false);
   const myNameRef = useRef(displayName);
+
+  // Paging state. All refs: it is read from inside the socket effect's
+  // closure and from timers, and none of it should re-render anything.
+  //
+  //   rankRef      the server's authoritative ordering, most deserving first
+  //   wantedRef    peers whose camera WE have asked for
+  //   wantersRef   peers who have asked for OURS (drives the encoder caps)
+  //   sharingRemote  peers currently screensharing - always subscribed
+  const rankRef = useRef<number[]>([]);
+  const wantedRef = useRef<Set<number>>(new Set());
+  const wantersRef = useRef<Set<number>>(new Set());
+  const sharingRemoteRef = useRef<Set<number>>(new Set());
+  const pinnedRef = useRef<number | "me" | null>(pinnedId);
+  const spotlightRef = useRef<number | "me" | null>(null);
+  const speakingRef = useRef({ on: false, lastSent: 0 });
 
   useEffect(() => {
     localStreamRef.current = localStream;
@@ -243,6 +318,9 @@ export function useMeeting(opts: UseMeetingOptions) {
       box.pc.close();
       pcsRef.current.delete(id);
     }
+    wantersRef.current.delete(id);
+    wantedRef.current.delete(id);
+    sharingRemoteRef.current.delete(id);
     setPeers((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
@@ -250,6 +328,104 @@ export function useMeeting(opts: UseMeetingOptions) {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
+
+  // How hard to encode, given how many peers currently want our camera.
+  const applyEncoderCaps = useCallback(() => {
+    const receivers = Math.max(1, wantersRef.current.size);
+    const tier =
+      ENCODER_TIERS.find((t) => receivers <= t.upTo) ??
+      ENCODER_TIERS[ENCODER_TIERS.length - 1];
+    pcsRef.current.forEach((box) => {
+      const sender = box.cameraSender;
+      if (!sender) return;
+      try {
+        const params = sender.getParameters();
+        // Chrome hands back an empty encodings array on a sender that has
+        // not negotiated yet; setParameters rejects that, so seed it.
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = tier.maxBitrate;
+        params.encodings[0].scaleResolutionDownBy = tier.scaleResolutionDownBy;
+        params.encodings[0].maxFramerate = tier.maxFramerate;
+        void sender.setParameters(params).catch(() => {});
+      } catch {
+      }
+    });
+  }, []);
+
+  // A peer told us whether they want our camera. This is the whole of the
+  // sending side of paging.
+  //
+  // replaceTrack, and never transceiver.direction + renegotiate: swapping
+  // the track on an existing sender needs no SDP round trip, whereas
+  // flipping direction does, and six people talking over each other would
+  // produce a renegotiation storm costing more than the problem it solves.
+  // The transceiver stays sendrecv throughout and the m-line never moves.
+  const setSendingVideoTo = useCallback(
+    (peerId: number, want: boolean) => {
+      if (want) wantersRef.current.add(peerId);
+      else wantersRef.current.delete(peerId);
+      const box = pcsRef.current.get(peerId);
+      if (box?.cameraSender) {
+        const track = want
+          ? localStreamRef.current?.getVideoTracks()[0] ?? null
+          : null;
+        // Idempotent: replacing null with null, or the same track with
+        // itself, is a no-op. So a duplicated or lost request costs nothing
+        // and there is no resync protocol to get wrong.
+        void box.cameraSender.replaceTrack(track).catch(() => {});
+      }
+      applyEncoderCaps();
+    },
+    [applyEncoderCaps]
+  );
+
+  // What this client wants to receive, recomputed from the server's ranking.
+  //
+  //     want = top-K by rank  u  pinned  u  spotlight  u  screensharing
+  //
+  // Derived from the *server's* order rather than from anything measured
+  // locally, which is what makes every grid in the meeting agree. A client
+  // could not do this itself even if it wanted to: once paging drops a
+  // track there is no longer any way to measure that peer's audio.
+  const recomputeWants = useCallback(() => {
+    const desired = new Set<number>();
+    const consider = (id: number | "me" | null | undefined) => {
+      if (typeof id === "number" && pcsRef.current.has(id)) desired.add(id);
+    };
+    consider(pinnedRef.current);
+    consider(spotlightRef.current);
+    for (const id of Array.from(sharingRemoteRef.current)) consider(id);
+
+    for (const id of rankRef.current) {
+      if (desired.size >= videoBudget) break;
+      consider(id);
+    }
+    // A quiet room has no ranking worth the name, and showing nobody's
+    // video because nobody has spoken yet would be absurd. Fill whatever
+    // budget is left with whoever is connected.
+    if (desired.size < videoBudget) {
+      for (const id of Array.from(pcsRef.current.keys())) {
+        if (desired.size >= videoBudget) break;
+        desired.add(id);
+      }
+    }
+
+    const previous = wantedRef.current;
+    for (const id of Array.from(desired)) {
+      if (!previous.has(id)) send({ type: "video-request", to: id, want: true });
+    }
+    for (const id of Array.from(previous)) {
+      if (!desired.has(id)) send({ type: "video-request", to: id, want: false });
+    }
+    wantedRef.current = desired;
+  }, [send, videoBudget]);
+
+  useEffect(() => {
+    pinnedRef.current = pinnedId;
+    recomputeWants();
+  }, [pinnedId, recomputeWants]);
 
   const ensurePc = useCallback(
     (peerId: number): RTCPeerConnection => {
@@ -261,14 +437,51 @@ export function useMeeting(opts: UseMeetingOptions) {
         iceServers: cfg.iceServers,
         iceCandidatePoolSize: cfg.iceCandidatePoolSize,
       });
-      const box: PeerBox = { pc, streams: new Map(), screenSid: null, screenSender: null };
+      const box: PeerBox = {
+        pc,
+        streams: new Map(),
+        screenSid: null,
+        screenSender: null,
+        cameraSender: null,
+      };
       pcsRef.current.set(peerId, box);
 
       const local = localStreamRef.current;
-      if (local) for (const t of local.getTracks()) pc.addTrack(t, local);
+      if (local) {
+        for (const t of local.getTracks()) {
+          const sender = pc.addTrack(t, local);
+          if (t.kind === "video") box.cameraSender = sender;
+        }
+      }
       if (sharingRef.current && screenTrackRef.current && screenStreamRef.current) {
         box.screenSender = pc.addTrack(screenTrackRef.current, screenStreamRef.current);
       }
+
+      // Prefer H.264, which is the codec most likely to have a hardware
+      // encoder behind it - and in a mesh this machine is running one
+      // encoder per peer, so it is the difference that matters most.
+      //
+      // Done here, before any offer exists. setCodecPreferences only affects
+      // the next negotiation, and calling it later would need one.
+      try {
+        const caps = RTCRtpSender.getCapabilities?.("video");
+        const tx = pc
+          .getTransceivers()
+          .find((t) => t.sender === box.cameraSender);
+        if (caps?.codecs && tx?.setCodecPreferences) {
+          const h264 = caps.codecs.filter((c) => /h264/i.test(c.mimeType));
+          const rest = caps.codecs.filter((c) => !/h264/i.test(c.mimeType));
+          if (h264.length) tx.setCodecPreferences([...h264, ...rest]);
+        }
+      } catch {
+      }
+
+      // Assume they want our camera until they say otherwise. A new peer
+      // connection has to carry a video m-line anyway, and one unwanted
+      // stream for the length of one round trip is cheaper than the
+      // handshake that would avoid it.
+      wantersRef.current.add(peerId);
+      applyEncoderCaps();
 
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "ice", to: peerId, candidate: e.candidate });
@@ -296,7 +509,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       };
       return pc;
     },
-    [send, recompute, participantId]
+    [send, recompute, participantId, applyEncoderCaps]
   );
 
   const makeOffer = useCallback(
@@ -464,6 +677,13 @@ export function useMeeting(opts: UseMeetingOptions) {
     }
   }, [makeOffer, send, stopShare]);
 
+  // Report our OWN microphone, and nothing else.
+  //
+  // This used to run an AnalyserNode over every *remote* stream and pick the
+  // loudest locally. That was wrong twice over: independent rankings meant
+  // two people in one meeting saw different grids, and - fatally for paging -
+  // you cannot measure the audio level of a peer whose track you just
+  // dropped. The server ranks; each client only reports itself.
   useEffect(() => {
     const AudioCtx =
       window.AudioContext ||
@@ -471,59 +691,64 @@ export function useMeeting(opts: UseMeetingOptions) {
         .webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
-    const analysers = new Map<
-      number | "me",
-      { node: AnalyserNode; data: Uint8Array<ArrayBuffer> }
-    >();
+    let node: AnalyserNode | null = null;
+    let data: Uint8Array<ArrayBuffer> | null = null;
+    let attachedTo: MediaStream | null = null;
 
-    const attach = (idKey: number | "me", stream: MediaStream | null) => {
-      if (!stream || analysers.has(idKey) || stream.getAudioTracks().length === 0)
-        return;
+    const attach = () => {
+      const stream = localStreamRef.current;
+      if (!stream || stream === attachedTo) return;
+      if (stream.getAudioTracks().length === 0) return;
       try {
         const src = ctx.createMediaStreamSource(stream);
-        const node = ctx.createAnalyser();
+        node = ctx.createAnalyser();
         node.fftSize = 512;
         src.connect(node);
-        analysers.set(idKey, {
-          node,
-          data: new Uint8Array(new ArrayBuffer(node.frequencyBinCount)),
-        });
+        data = new Uint8Array(new ArrayBuffer(node.frequencyBinCount));
+        attachedTo = stream;
       } catch {
       }
     };
 
     const interval = setInterval(() => {
-      attach("me", localStreamRef.current);
-      pcsRef.current.forEach((box, id) => {
-        for (const s of Array.from(box.streams.values())) {
-          if (s.getAudioTracks().length) {
-            attach(id, s);
-            break;
-          }
-        }
-      });
+      attach();
+      if (!node || !data) return;
+      node.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const avg = sum / data.length;
 
-      let loudest: number | "me" | null = null;
-      let max = 12;
-      analysers.forEach(({ node, data }, idKey) => {
-        node.getByteFrequencyData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += data[i];
-        const avg = sum / data.length;
-        if (idKey === "me" && stateRef.current.muted) return;
-        if (avg > max) {
-          max = avg;
-          loudest = idKey;
-        }
+      const state = speakingRef.current;
+      // Muted means not speaking, whatever the microphone hears - otherwise
+      // muting yourself mid-sentence keeps you at the top of everyone's grid.
+      const on = stateRef.current.muted
+        ? false
+        : state.on
+          ? avg > SPEAKING_RELEASE
+          : avg > SPEAKING_ENTER;
+
+      const now = Date.now();
+      const crossed = on !== state.on;
+      const refreshDue = on && now - state.lastSent >= SPEAKING_REFRESH_MS;
+      if (!crossed && !refreshDue) return;
+      if (now - state.lastSent < SPEAKING_REPORT_MIN_MS) return;
+
+      state.on = on;
+      state.lastSent = now;
+      send({
+        type: "speaking",
+        on,
+        // Normalised to 0-100. The absolute scale is arbitrary; all the
+        // server does with it is order simultaneous speakers.
+        level: Math.max(0, Math.min(100, Math.round((avg / 60) * 100))),
       });
-      setActiveSpeakerId(loudest);
-    }, 500);
+    }, LEVEL_SAMPLE_MS);
 
     return () => {
       clearInterval(interval);
       ctx.close().catch(() => {});
     };
-  }, []);
+  }, [send]);
 
   useEffect(() => {
     if (startedRef.current) return;
@@ -566,6 +791,7 @@ export function useMeeting(opts: UseMeetingOptions) {
             upsertPeer(peer.id, {}, peer);
             ensurePc(peer.id);
             applyPeerShareInfo(peer);
+            if (peer.sharing) sharingRemoteRef.current.add(peer.id);
             // The lower participant id owns the offer for a pair. Ids are
             // handed out in ascending order, so on a first join ours is
             // always the highest and the peers already in the room do the
@@ -575,15 +801,36 @@ export function useMeeting(opts: UseMeetingOptions) {
             // socket comes back and the video never does.
             if (participantId < peer.id) makeOffer(peer.id);
           }
+          recomputeWants();
           break;
         case "peer-joined": {
           const peer = msg.peer as RemotePeer;
           upsertPeer(peer.id, {}, peer);
           ensurePc(peer.id);
           applyPeerShareInfo(peer);
+          if (peer.sharing) sharingRemoteRef.current.add(peer.id);
           if (participantId < peer.id) makeOffer(peer.id);
+          recomputeWants();
           break;
         }
+        // The server's ranking. Every client in the room gets the identical
+        // list and derives its desired set from it, which is what stops two
+        // grids disagreeing and the tracks between them thrashing.
+        case "active-speakers": {
+          rankRef.current = (msg.ranked as number[]) ?? [];
+          const speaking = new Set((msg.speaking as number[]) ?? []);
+          const loudest =
+            rankRef.current.find((id) => speaking.has(id)) ?? null;
+          setActiveSpeakerId(
+            loudest === null ? null : loudest === participantId ? "me" : loudest
+          );
+          recomputeWants();
+          break;
+        }
+        // A peer telling us whether to send them our camera.
+        case "video-request":
+          setSendingVideoTo(msg.from, !!msg.want);
+          break;
         case "offer": {
           const pc = ensurePc(msg.from);
           await pc.setRemoteDescription(msg.sdp);
@@ -629,6 +876,11 @@ export function useMeeting(opts: UseMeetingOptions) {
             recompute(msg.from);
           }
           upsertPeer(msg.from, { sharing: msg.on });
+          // A screenshare is always subscribed - it is the one thing in the
+          // room nobody can follow from an avatar.
+          if (msg.on) sharingRemoteRef.current.add(msg.from);
+          else sharingRemoteRef.current.delete(msg.from);
+          recomputeWants();
           break;
         }
         case "rename":
@@ -640,6 +892,8 @@ export function useMeeting(opts: UseMeetingOptions) {
           break;
         case "spotlight":
           setSpotlightId(msg.target ?? null);
+          spotlightRef.current = msg.target ?? null;
+          recomputeWants();
           break;
         case "lower-hand":
           setHandRaised(false);
@@ -689,6 +943,7 @@ export function useMeeting(opts: UseMeetingOptions) {
           break;
         case "peer-left":
           removePeerLocal(msg.id);
+          recomputeWants();
           break;
       }
     };
@@ -702,6 +957,12 @@ export function useMeeting(opts: UseMeetingOptions) {
     };
 
     const closePeers = () => {
+      // Peer connections are rebuilt from scratch on reconnect, so every
+      // subscription is void. Cleared here rather than remembered, so the
+      // recompute that follows the next `peers` frame re-asks from nothing
+      // instead of diffing against a set that no longer exists.
+      wantedRef.current.clear();
+      wantersRef.current.clear();
       pcsRef.current.forEach((box) => {
         box.pc.onicecandidate = null;
         box.pc.ontrack = null;
