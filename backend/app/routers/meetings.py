@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
+from ..config import ROOM_CAP
 from ..database import get_db
 from ..deps import get_current_user, get_optional_user
 from ..models import _now
@@ -212,6 +213,24 @@ def join_meeting(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This meeting is locked by the host.",
+        )
+    # The hard room cap. Parley is a mesh: every participant uploads a copy of
+    # their video to every other one, so the ceiling is client CPU and uplink
+    # and it is reached well before anything on the server notices. A measured
+    # limit that is enforced is a defensible engineering position; letting a
+    # thirteenth person in and watching the room degrade for all thirteen is
+    # not. The host is exempt - being unable to enter your own meeting because
+    # guests filled it is worse than one extra participant.
+    #
+    # Also enforced on the websocket, because a participant row can be created
+    # long before the socket opens.
+    if not is_owner and crud.active_participant_count(db, meeting) >= ROOM_CAP:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"This meeting is full ({ROOM_CAP} participants). Parley uses "
+                "a peer-to-peer mesh, so the limit is a measured one."
+            ),
         )
     if (
         not is_owner

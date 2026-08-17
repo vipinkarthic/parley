@@ -10,24 +10,28 @@ so nothing can be spoofed from the client.
 """
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
 from . import crud, models
+from .config import ROOM_CAP, VIDEO_BUDGET
 from .database import SessionLocal
+from .speakers import RoomSpeakers
 
 router = APIRouter()
 
 # Application close codes. The 4000-4999 range is reserved for the application
 # by the WebSocket spec. The client's reconnect logic keys off these: 4001,
-# 4003, 4004 and 4005 are final for the meeting and must not be retried, while
-# 4009 means "this socket was replaced" and the newer socket carries on.
+# 4003, 4004, 4005 and 4006 are final for the meeting and must not be retried,
+# while 4009 means "this socket was replaced" and the newer socket carries on.
 WS_BAD_PID = 4001
 WS_UNAUTHORISED = 4003
 WS_DENIED = 4004
 WS_MEETING_ENDED = 4005
 WS_SUPERSEDED = 4009
+WS_ROOM_FULL = 4006
 
 # RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
 # Render service, and it is not an error - the client is expected to come back.
@@ -64,6 +68,10 @@ class Hub:
         self.rooms: dict[str, dict[int, dict]] = {}
         self.lobbies: dict[str, dict[int, dict]] = {}
         self.settings: dict[str, dict] = {}
+        # Per-room active-speaker ranking. Server-authoritative on purpose:
+        # if clients ranked independently their grids would disagree and
+        # tracks would thrash. See speakers.py.
+        self.speakers: dict[str, RoomSpeakers] = {}
         # Set on SIGTERM. Room state lives in this process, so a redeploy
         # necessarily ends every meeting on this instance; the flag is what
         # turns that into a reconnect rather than a failure.
@@ -97,8 +105,42 @@ class Hub:
     def setting(self, number: str, key: str) -> bool:
         return self.settings.get(number, {}).get(key, True)
 
+    def ranking(self, number: str) -> RoomSpeakers:
+        room = self.speakers.get(number)
+        if room is None:
+            room = self.speakers[number] = RoomSpeakers()
+        return room
+
+    def occupancy(self, number: str) -> int:
+        """Everyone holding a slot: in the room, or waiting for one.
+
+        The lobby counts. A waiting room full of guests the host is about to
+        admit is a room that is about to be over capacity, and finding that
+        out at admit time - after they have been told they are in - is worse
+        than refusing the join.
+        """
+        return len(self.rooms.get(number, {})) + len(self.lobbies.get(number, {}))
+
     def add_room(self, number: str, pid: int, ws: WebSocket, info: dict) -> None:
         self.rooms.setdefault(number, {})[pid] = {"ws": ws, "info": info}
+        ranking = self.ranking(number)
+        ranking.add(pid, time.monotonic() * 1000)
+        # Membership changed, so the ranking means something different even
+        # if no level moved.
+        ranking.invalidate()
+
+    async def publish_ranking(self, number: str, force: bool = False) -> None:
+        """Broadcast the ranking if anything a client would act on changed."""
+        ranking = self.speakers.get(number)
+        if ranking is None:
+            return
+        now_ms = time.monotonic() * 1000
+        if force:
+            await self.broadcast(number, ranking.snapshot(now_ms))
+            return
+        message = ranking.due(now_ms, VIDEO_BUDGET)
+        if message is not None:
+            await self.broadcast(number, message)
 
     def remove_room(self, number: str, pid: int) -> None:
         room = self.rooms.get(number)
@@ -106,6 +148,11 @@ class Hub:
             del room[pid]
             if not room:
                 self.rooms.pop(number, None)
+                self.speakers.pop(number, None)
+        ranking = self.speakers.get(number)
+        if ranking is not None:
+            ranking.remove(pid)
+            ranking.invalidate()
 
     def entry(self, number: str, pid: int) -> dict | None:
         """This participant's live socket entry, in the room or the lobby."""
@@ -523,6 +570,15 @@ async def meeting_socket(websocket: WebSocket, number: str):
 
     await _evict_existing_socket(number, pid, websocket)
 
+    # The hard cap, enforced here as well as at POST /join. A participant row
+    # can be created long before the socket opens - a prejoin screen left
+    # open, a tab restored - so the HTTP check alone is a hole. Checked after
+    # eviction so a reconnecting participant is not refused a seat they
+    # already hold.
+    if hub.occupancy(number) >= ROOM_CAP:
+        await websocket.close(code=WS_ROOM_FULL)
+        return
+
     waiting = admission == "waiting"
 
     if waiting:
@@ -536,6 +592,10 @@ async def meeting_socket(websocket: WebSocket, number: str):
         await hub.send(websocket, {"type": "peers", "peers": hub.peers(number, pid)})
         hub.add_room(number, pid, websocket, info)
         await hub.broadcast(number, {"type": "peer-joined", "peer": info}, exclude=pid)
+        # Sent unconditionally to the room, not just to the newcomer: everyone
+        # else's desired set depends on who is present, and a client ranking
+        # blind subscribes to the wrong people for up to a broadcast interval.
+        await hub.publish_ranking(number, force=True)
         if info["isHost"]:
             await hub.send(
                 websocket, {"type": "waiting-list", "waiting": hub.waiting_list(number)}
@@ -565,6 +625,32 @@ async def meeting_socket(websocket: WebSocket, number: str):
             if mtype in ("offer", "answer", "ice") and "to" in data:
                 data["from"] = pid
                 await hub.send_to(number, data["to"], data)
+            elif mtype == "speaking":
+                # A client reports only its OWN microphone. It cannot report
+                # anyone else's, which is the point: once paging drops a
+                # track there is nobody left who can measure that peer.
+                hub.ranking(number).report(
+                    pid,
+                    on=bool(data.get("on")),
+                    level=int(data.get("level") or 0),
+                    now_ms=time.monotonic() * 1000,
+                )
+                await hub.publish_ranking(number)
+            elif mtype == "video-request" and "to" in data:
+                # Relayed per pair, exactly like an offer. In a mesh each
+                # sender holds one peer connection per receiver, so "stop
+                # sending me video" is genuinely a per-pair statement and the
+                # server keeps no subscription table to desync from - the
+                # state that matters lives on the sender's RTCRtpSender.
+                await hub.send_to(
+                    number,
+                    int(data["to"]),
+                    {
+                        "type": "video-request",
+                        "from": pid,
+                        "want": bool(data.get("want")),
+                    },
+                )
             elif mtype == "state":
                 new_muted = bool(data.get("muted", info["muted"]))
                 if (
@@ -700,6 +786,7 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 was_host = info.get("isHost")
                 hub.remove_room(number, pid)
                 await hub.broadcast(number, {"type": "peer-left", "id": pid})
+                await hub.publish_ranking(number, force=True)
                 if was_host and not hub.host_pids(number):
                     await hub.broadcast_lobby(
                         number, {"type": "host-present", "present": False}
