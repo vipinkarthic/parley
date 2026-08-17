@@ -474,11 +474,55 @@ lost response safe.
 
 Deliberate, and stated rather than papered over.
 
-- **Room size.** The mesh is the binding constraint: every peer uploads a
-  separate encode of its own video to every other peer, so upstream bandwidth
-  and CPU grow with the square of the room. Small groups are the design target.
-  **The exact ceiling has not been measured yet** - no number is claimed here
-  until it has been.
+### Room size, and what is actually known about it
+
+The mesh is the binding constraint. Every peer uploads a separate encode of
+its own camera to every other peer, so upstream bandwidth and CPU grow with
+the square of the room, and all of that cost is paid by the participants -
+the server relays signalling and touches no media at all. Small groups are
+the design target, and that is a choice rather than an accident: the correct
+fix for a higher ceiling is an SFU, which is a week of work, a VM with a UDP
+port range, and a bill.
+
+Two things raise the ceiling without one, and both ship:
+
+- **Active-speaker paging.** Each client subscribes to `top-5 by rank ∪
+  pinned ∪ spotlight ∪ anyone screensharing` and asks everyone else to stop
+  sending it video. Senders comply with `replaceTrack(null)`, which needs no
+  renegotiation. The ranking is computed **on the server**, with hysteresis,
+  so every client derives the same set and tracks do not thrash.
+  *The limit of this, stated plainly:* a sender only saves upstream when
+  **every** receiver has dropped it, so one person pinning you keeps one
+  encode and one upload alive.
+- **Encoder caps.** `maxBitrate`, `scaleResolutionDownBy` and `maxFramerate`
+  step down as the number of peers receiving your camera grows - 1.2 Mbps at
+  one receiver, 200 kbps and quarter framerate past six - with H.264
+  preferred so a hardware encoder can do the work.
+
+**The room cap is 12, and 12 is not yet a measured number.** It is enforced
+server-side, on both the join endpoint and the websocket, so it is a real
+limit rather than an intention - but it is a placeholder standing in until
+the ramp below has been run. Do not cite it as a measured capacity.
+
+**What has actually been measured on the media plane:** one rung. Three
+peers, real headless Chrome, real mesh, on a 20-core i7-12700H:
+
+| peers | uplink/peer | downlink/peer | sent | outbound streams |
+|---|---|---|---|---|
+| 3 | 484 kbps | 484 kbps | 320p @ 19.8 fps | 6 |
+
+That is the shape working - six streams is exactly 3x2, and the resolution
+and framerate are the encoder tier for a two-receiver sender - but three
+peers is not where a mesh gets into trouble, so it says nothing about the
+ceiling. **The ramp to 12 has not been run.** The harness for it is
+committed at `backend/tools/loadtest.py`; see *Measuring it yourself* below.
+
+One caveat that applies to any number this harness produces: every peer runs
+on one machine. Bitrate figures transfer directly, because a peer's uplink
+does not depend on where the other peers are. **CPU figures do not** - a real
+participant pays for one encode set and N-1 decodes, while the test machine
+pays for all N of both, so its total CPU is an upper bound rather than a
+per-participant reading.
 - **TURN needs an account before it does anything.** The relay path is fully
   wired - `GET /api/ice`, credential rotation without a rebuild, ICE restart on
   failure - but the default relay it points at does not work. Open Relay's
@@ -520,6 +564,62 @@ Deliberate, and stated rather than papered over.
   fixed window, so it resets on restart and would not be shared across
   instances. It meaningfully slows brute force at one instance, which is what
   there is.
+- **Slow consumers are unbounded.** Broadcasts fan out concurrently, so one
+  slow receiver no longer delays the others - but its own send is still
+  awaited and there is no bounded queue and no eviction. A peer that never
+  drains still accumulates. Not a problem at this room size, and named here
+  rather than engineered around.
+
+### Signalling-plane numbers, measured
+
+These are measured, with a command behind each one
+(`backend/tools/bench_signalling.py`).
+
+**Broadcast fan-out** - 12 receivers, sends artificially delayed 25 ms, showing
+what the receivers who are *not* slow have to wait:
+
+| slow receivers | before | after |
+|---|---|---|
+| 1 | 25.2 ms | 0.08 ms |
+| 3 | 75.5 ms | 0.09 ms |
+| 6 | 151.0 ms | 0.09 ms |
+
+With every receiver healthy the difference is small and honest: end to end
+over real sockets, 0.61 ms → 0.50 ms p50. Concurrency buys nothing when
+nobody is slow.
+
+**Event-loop blocking** - ping/pong latency on a socket doing nothing, while
+another socket sends messages that persist, against a real remote Postgres:
+
+| | before | after |
+|---|---|---|
+| behind one persisted rename | 453 ms | 0.44 ms |
+| during a 60-write burst (max) | 27.6 s | 0.71 ms |
+
+**Cold start** - the hosted backend measured 15.4 s from spun-down on
+2026-09-10. That is what the keepalive exists for.
+
+### Measuring it yourself
+
+The media-plane ramp is a real load test: it launches up to N headless
+Chrome instances with synthetic cameras and will saturate the machine it
+runs on, so run it somewhere you do not mind being busy.
+
+```bash
+# with the backend and frontend running locally
+cd backend
+python tools/loadtest.py --web http://127.0.0.1:3000 \
+                         --api http://127.0.0.1:8000 \
+                         --ramp 2,4,6,8,10,12 --hold 20 \
+                         --json ramp.json
+```
+
+It creates a meeting through the real API, drives each browser through the
+real prejoin screen, and reports uplink, downlink, sent resolution and
+framerate, outbound stream count, and CPU per rung. Collapse shows up as
+resolution and framerate falling while `qualityLimitationReason` turns to
+`cpu` or `bandwidth` - a mesh under strain does not stop, it quietly sends
+160x120 at 4 fps. **Set `ROOM_CAP` from where that happens.**
 
 ---
 
