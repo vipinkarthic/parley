@@ -12,6 +12,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.concurrency import run_in_threadpool
 
 from . import crud, models
 from .database import SessionLocal
@@ -217,18 +218,66 @@ class Hub:
 hub = Hub()
 
 
-def _set_admission(pid: int, meeting_id: str, admission: str) -> None:
+# ---------------------------------------------------------------------------
+# Database access from the signalling handler.
+#
+# Every function below is synchronous SQLAlchemy, and the handler that calls
+# them is `async def`. Called directly, each one blocks the event loop for the
+# whole round trip - which means it blocks *every* meeting on the instance,
+# not just the socket that triggered it. That is cheap to miss on SQLite,
+# where a write is microseconds. It is not cheap in production: Render runs in
+# Oregon and Neon in Singapore, so a single persisted `rename` was measured
+# stalling an uninvolved participant's ping/pong for ~450ms.
+#
+# So each one is a plain sync `_do_*` that a thin `await`-able wrapper hands
+# to the threadpool - the same pool FastAPI already runs its sync endpoints
+# in. The session stays short-lived and thread-confined: a Session held open
+# across an await and shared between threads is neither thread-safe nor
+# affordable, since it would hold one pooled connection for the life of the
+# socket and the pool is ten connections wide.
+#
+# Note the ordering rule the callers follow: live state lives in the hub, and
+# the database is for what has to survive a reconnect. Presentation changes
+# (rename, settings) are broadcast first and persisted after, so no
+# participant waits on a cross-Pacific write to see them. Authorisation
+# changes (admission, ended) are persisted first, because a reconnect re-reads
+# them and must not be able to undo the decision.
+# ---------------------------------------------------------------------------
+
+
+def _do_set_admission(pids: list[int], meeting_id: str, admission: str) -> None:
+    """Set admission for one or many participants in a single transaction.
+
+    `admit-all` and the auto-admit that runs when a host arrives with the
+    waiting room off both walk the whole lobby. One session per guest meant
+    one full round trip per guest, serially, with the event loop blocked for
+    all of them.
+    """
+    if not pids:
+        return
     db = SessionLocal()
     try:
-        p = db.get(models.Participant, pid)
-        if p and p.meeting_id == meeting_id:
+        rows = (
+            db.query(models.Participant)
+            .filter(
+                models.Participant.id.in_(pids),
+                models.Participant.meeting_id == meeting_id,
+            )
+            .all()
+        )
+        for p in rows:
             p.admission = admission
+        if rows:
             db.commit()
     finally:
         db.close()
 
 
-def _set_waiting_room(meeting_id: str, on: bool) -> None:
+async def _set_admission(pids: list[int], meeting_id: str, admission: str) -> None:
+    await run_in_threadpool(_do_set_admission, pids, meeting_id, admission)
+
+
+def _do_set_waiting_room(meeting_id: str, on: bool) -> None:
     db = SessionLocal()
     try:
         m = db.get(models.Meeting, meeting_id)
@@ -239,7 +288,11 @@ def _set_waiting_room(meeting_id: str, on: bool) -> None:
         db.close()
 
 
-def _update_settings(meeting_id: str, patch: dict) -> None:
+async def _set_waiting_room(meeting_id: str, on: bool) -> None:
+    await run_in_threadpool(_do_set_waiting_room, meeting_id, on)
+
+
+def _do_update_settings(meeting_id: str, patch: dict) -> None:
     db = SessionLocal()
     try:
         m = db.get(models.Meeting, meeting_id)
@@ -249,7 +302,11 @@ def _update_settings(meeting_id: str, patch: dict) -> None:
         db.close()
 
 
-def _rename(meeting_id: str, pid: int, name: str) -> None:
+async def _update_settings(meeting_id: str, patch: dict) -> None:
+    await run_in_threadpool(_do_update_settings, meeting_id, patch)
+
+
+def _do_rename(meeting_id: str, pid: int, name: str) -> None:
     db = SessionLocal()
     try:
         p = db.get(models.Participant, pid)
@@ -260,7 +317,11 @@ def _rename(meeting_id: str, pid: int, name: str) -> None:
         db.close()
 
 
-def _deactivate(meeting_id: str, pid: int) -> None:
+async def _rename(meeting_id: str, pid: int, name: str) -> None:
+    await run_in_threadpool(_do_rename, meeting_id, pid, name)
+
+
+def _do_deactivate(meeting_id: str, pid: int) -> None:
     db = SessionLocal()
     try:
         crud.deactivate_participant(db, meeting_id, pid)
@@ -268,21 +329,99 @@ def _deactivate(meeting_id: str, pid: int) -> None:
         db.close()
 
 
-def _reactivate(meeting_id: str, pid: int) -> None:
-    """Undo the deactivation a dropped socket performed.
+async def _deactivate(meeting_id: str, pid: int) -> None:
+    await run_in_threadpool(_do_deactivate, meeting_id, pid)
 
-    Every disconnect marks the participant inactive, and both `host_present`
-    and `active_participant_count` read that flag - so without this a
-    reconnecting participant comes back invisible to the API, and a
-    reconnecting host leaves the waiting room believing nobody is hosting.
+
+def _do_deny(meeting_id: str, pid: int) -> None:
+    """Mark a guest denied and inactive in one transaction.
+
+    Two separate sessions for two single-column updates on the same row is two
+    round trips for no reason, and it left a window where a participant was
+    denied but still counted as active.
     """
     db = SessionLocal()
     try:
         p = db.get(models.Participant, pid)
         if p and p.meeting_id == meeting_id:
-            crud.reactivate_participant(db, p)
+            p.admission = "denied"
+            p.is_active = False
+            db.commit()
     finally:
         db.close()
+
+
+async def _deny(meeting_id: str, pid: int) -> None:
+    await run_in_threadpool(_do_deny, meeting_id, pid)
+
+
+def _do_end_meeting(meeting_id: str) -> None:
+    db = SessionLocal()
+    try:
+        m = db.get(models.Meeting, meeting_id)
+        if m:
+            crud.end_meeting(db, m)
+    finally:
+        db.close()
+
+
+async def _end_meeting(meeting_id: str) -> None:
+    await run_in_threadpool(_do_end_meeting, meeting_id)
+
+
+def _do_load_context(number: str, pid: int, token: str) -> dict:
+    """Everything the socket needs from the database, in one session.
+
+    This is the only read the connection performs. Authentication, the
+    terminal-state checks, the meeting settings snapshot, the participant's
+    display name and host flag, and the reactivation that undoes the previous
+    socket's teardown all used to be spread over two sessions and two round
+    trips; they are one transaction now, and nothing after this point touches
+    the database until the participant does something that has to be
+    persisted.
+
+    Returns either ``{"close": <code>}`` or the context. Raising for the
+    rejection cases would mean building exception types whose only job is to
+    carry an integer across a threadpool boundary.
+    """
+    db = SessionLocal()
+    try:
+        meeting = crud.get_meeting_by_number(db, number)
+        participant = (
+            crud.get_participant_by_token(db, meeting.id, pid, token)
+            if meeting
+            else None
+        )
+        if meeting is None or participant is None:
+            return {"close": WS_UNAUTHORISED}
+        # Terminal states get their own codes so the client stops retrying.
+        # This matters now that the client reconnects on its own: a denied
+        # guest still holds a valid ws_token, and `admission == "denied"` is
+        # not "waiting", so a reconnect would otherwise have walked them
+        # straight into the room the host just refused them.
+        if participant.admission == "denied":
+            return {"close": WS_DENIED}
+        if meeting.status == "ended":
+            return {"close": WS_MEETING_ENDED}
+
+        # A reconnect reuses the participant row, so the flag the dropped
+        # socket cleared has to be put back before anyone reads presence off
+        # it. Same session as the load - it is the same row.
+        crud.reactivate_participant(db, participant)
+
+        return {
+            "meeting_id": meeting.id,
+            "admission": participant.admission,
+            "settings": {k: getattr(meeting, k) for k in SETTING_KEYS},
+            "display_name": participant.display_name,
+            "is_host": participant.is_host,
+        }
+    finally:
+        db.close()
+
+
+async def _load_context(number: str, pid: int, token: str) -> dict:
+    return await run_in_threadpool(_do_load_context, number, pid, token)
 
 
 async def _evict_existing_socket(number: str, pid: int, keep: WebSocket) -> None:
@@ -303,29 +442,47 @@ async def _evict_existing_socket(number: str, pid: int, keep: WebSocket) -> None
     await _close_quietly(stale["ws"], WS_SUPERSEDED)
 
 
-def _end_meeting(meeting_id: str) -> None:
-    db = SessionLocal()
-    try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            crud.end_meeting(db, m)
-    finally:
-        db.close()
+async def _admit(number: str, meeting_id: str, *targets: int) -> None:
+    """Move waiting participants into the room.
 
-
-async def _admit(number: str, meeting_id: str, target: int) -> None:
-    """Move a waiting participant into the room."""
-    entry = hub.remove_lobby(number, target)
-    if not entry:
+    Variadic on purpose. `admit-all`, and the auto-admit that runs when a host
+    joins a room whose waiting room is off, both used to call this once per
+    guest - and each call opened its own session, so a lobby of six guests was
+    six serial round trips with the event loop blocked throughout. The
+    admission write is now one transaction for the whole batch, and the
+    resulting fan-out is one broadcast per admitted guest rather than one per
+    guest per guest.
+    """
+    entries = []
+    for target in targets:
+        entry = hub.remove_lobby(number, target)
+        if entry:
+            entries.append(entry)
+    if not entries:
         return
-    _set_admission(target, meeting_id, "admitted")
-    info = entry["info"]
-    ws = entry["ws"]
-    await hub.send(ws, {"type": "admitted"})
-    await hub.send(ws, {"type": "peers", "peers": hub.peers(number, target)})
-    hub.add_room(number, target, ws, info)
-    await hub.broadcast(number, {"type": "peer-joined", "peer": info}, exclude=target)
+
+    # Persisted before anyone is told, because admission is re-read on
+    # reconnect: a guest who saw "admitted" and then reconnected into the
+    # lobby because the write had not landed is a worse bug than a slow admit.
+    await _set_admission(
+        [e["info"]["id"] for e in entries], meeting_id, "admitted"
+    )
+
+    for entry in entries:
+        info = entry["info"]
+        ws = entry["ws"]
+        target = info["id"]
+        await hub.send(ws, {"type": "admitted"})
+        await hub.send(ws, {"type": "peers", "peers": hub.peers(number, target)})
+        hub.add_room(number, target, ws, info)
+        await hub.broadcast(
+            number, {"type": "peer-joined", "peer": info}, exclude=target
+        )
     await hub.notify_hosts_waiting(number)
+
+
+def _lobby_pids(number: str) -> list[int]:
+    return [e["info"]["id"] for e in hub.lobby_entries(number)]
 
 
 @router.websocket("/ws/meetings/{number}")
@@ -345,42 +502,25 @@ async def meeting_socket(websocket: WebSocket, number: str):
         return
 
     token = params.get("token", "")
-    db = SessionLocal()
-    try:
-        meeting = crud.get_meeting_by_number(db, number)
-        participant = (
-            crud.get_participant_by_token(db, meeting.id, pid, token) if meeting else None
-        )
-        if meeting is None or participant is None:
-            await websocket.close(code=WS_UNAUTHORISED)
-            return
-        # Terminal states get their own codes so the client stops retrying.
-        # This matters now that the client reconnects on its own: a denied
-        # guest still holds a valid ws_token, and `admission == "denied"` is
-        # not "waiting", so a reconnect would otherwise have walked them
-        # straight into the room the host just refused them.
-        if participant.admission == "denied":
-            await websocket.close(code=WS_DENIED)
-            return
-        if meeting.status == "ended":
-            await websocket.close(code=WS_MEETING_ENDED)
-            return
-        meeting_id = meeting.id
-        admission = participant.admission
-        hub.settings[number] = {k: getattr(meeting, k) for k in SETTING_KEYS}
-        info = {
-            "id": pid,
-            "displayName": participant.display_name,
-            "isHost": participant.is_host,
-            "muted": params.get("muted", "0") == "1",
-            "videoOn": params.get("video", "1") == "1",
-        }
-    finally:
-        db.close()
+    # The one and only database round trip this connection makes up front:
+    # authentication, terminal-state checks, the settings snapshot and the
+    # reconnect reactivation, in a single session, off the event loop.
+    context = await _load_context(number, pid, token)
+    if "close" in context:
+        await websocket.close(code=context["close"])
+        return
 
-    # A reconnect reuses the participant row, so the flag the dropped socket
-    # cleared has to be put back before anyone reads presence off it.
-    _reactivate(meeting_id, pid)
+    meeting_id = context["meeting_id"]
+    admission = context["admission"]
+    hub.settings[number] = context["settings"]
+    info = {
+        "id": pid,
+        "displayName": context["display_name"],
+        "isHost": context["is_host"],
+        "muted": params.get("muted", "0") == "1",
+        "videoOn": params.get("video", "1") == "1",
+    }
+
     await _evict_existing_socket(number, pid, websocket)
 
     waiting = admission == "waiting"
@@ -402,8 +542,7 @@ async def meeting_socket(websocket: WebSocket, number: str):
             )
             await hub.broadcast_lobby(number, {"type": "host-present", "present": True})
             if not hub.setting(number, "waiting_room"):
-                for entry in hub.lobby_entries(number):
-                    await _admit(number, meeting_id, entry["info"]["id"])
+                await _admit(number, meeting_id, *_lobby_pids(number))
 
     try:
         while True:
@@ -480,12 +619,17 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 if info["isHost"] or hub.setting(number, "allow_rename"):
                     new_name = str(data.get("name", "")).strip()[:120]
                     if new_name:
+                        # Announced before it is stored. The hub is what the
+                        # room reads its live state from; the row only has to
+                        # be right by the time somebody reconnects. Persisting
+                        # first would make every rename cost a round trip to
+                        # Singapore before anyone saw it.
                         info["displayName"] = new_name
-                        _rename(meeting_id, pid, new_name)
                         await hub.broadcast(
                             number,
                             {"type": "rename", "from": pid, "displayName": new_name},
                         )
+                        await _rename(meeting_id, pid, new_name)
 
             elif mtype == "mute-all" and info["isHost"]:
                 await hub.broadcast(number, {"type": "force-mute"}, exclude=pid)
@@ -495,41 +639,41 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 target = int(data["target"])
                 await hub.send_to(number, target, {"type": "removed"})
                 await hub.broadcast(number, {"type": "peer-left", "id": target}, exclude=target)
-                _deactivate(meeting_id, target)
+                await _deactivate(meeting_id, target)
             elif mtype == "end-meeting" and info["isHost"]:
-                _end_meeting(meeting_id)
+                # Persisted first: `status == "ended"` is what stops a
+                # reconnect walking back into a meeting the host closed.
+                await _end_meeting(meeting_id)
                 await hub.broadcast(number, {"type": "meeting-ended"})
                 await hub.broadcast_lobby(number, {"type": "meeting-ended"})
             elif mtype == "admit" and info["isHost"] and "target" in data:
                 await _admit(number, meeting_id, int(data["target"]))
             elif mtype == "admit-all" and info["isHost"]:
-                for entry in hub.lobby_entries(number):
-                    await _admit(number, meeting_id, entry["info"]["id"])
+                await _admit(number, meeting_id, *_lobby_pids(number))
             elif mtype == "deny" and info["isHost"] and "target" in data:
                 target = int(data["target"])
                 entry = hub.remove_lobby(number, target)
                 if entry:
-                    _set_admission(target, meeting_id, "denied")
-                    _deactivate(meeting_id, target)
+                    # One transaction for both columns; a denied guest who is
+                    # still flagged active is counted as present by the API.
+                    await _deny(meeting_id, target)
                     await hub.send(entry["ws"], {"type": "denied"})
                     await hub.notify_hosts_waiting(number)
             elif mtype == "waiting-room" and info["isHost"]:
                 on = bool(data.get("on"))
-                _set_waiting_room(meeting_id, on)
                 hub.settings.setdefault(number, {})["waiting_room"] = on
                 await hub.broadcast(number, {"type": "waiting-room", "on": on})
                 if not on:
-                    for entry in hub.lobby_entries(number):
-                        await _admit(number, meeting_id, entry["info"]["id"])
+                    await _admit(number, meeting_id, *_lobby_pids(number))
+                await _set_waiting_room(meeting_id, on)
             elif mtype == "settings" and info["isHost"]:
                 patch = {k: bool(v) for k, v in (data.get("settings") or {}).items() if k in SETTING_KEYS}
                 if patch:
                     hub.settings.setdefault(number, {}).update(patch)
-                    _update_settings(meeting_id, patch)
                     await hub.broadcast(number, {"type": "settings", "settings": hub.settings[number]})
                     if patch.get("waiting_room") is False:
-                        for entry in hub.lobby_entries(number):
-                            await _admit(number, meeting_id, entry["info"]["id"])
+                        await _admit(number, meeting_id, *_lobby_pids(number))
+                    await _update_settings(meeting_id, patch)
             elif mtype == "spotlight" and info["isHost"]:
                 await hub.broadcast(
                     number, {"type": "spotlight", "target": data.get("target")}
@@ -568,4 +712,4 @@ async def meeting_socket(websocket: WebSocket, number: str):
             # and hostless waiting rooms for the length of the deploy - and
             # spend one database write per participant to do it.
             if not hub.shutting_down:
-                _deactivate(meeting_id, pid)
+                await _deactivate(meeting_id, pid)
