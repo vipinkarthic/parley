@@ -129,6 +129,23 @@ def count_sessions(monkeypatch):
     return calls
 
 
+def _set_waiting_room(number: str, on: bool) -> None:
+    from app import models
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(models.Meeting)
+            .filter(models.Meeting.meeting_number == number)
+            .first()
+        )
+        row.waiting_room = on
+        db.commit()
+    finally:
+        db.close()
+
+
 def _meeting_with_host(client):
     token, _ = signup(client, unique_email("perf"))
     meeting = client.post(
@@ -231,12 +248,11 @@ def test_admitting_a_lobby_full_of_guests_is_one_transaction(client, count_sessi
     now batched, so the count does not grow with the size of the lobby."""
     token, meeting, host = _meeting_with_host(client)
     number = meeting["meeting_number"]
-    # Waiting room on, so guests queue rather than walk straight in.
-    client.patch(
-        f"/api/meetings/{number}",
-        json={"settings": {"waiting_room": True}},
-        headers=auth_header(token),
-    )
+    # Waiting room on, so guests queue rather than walk straight in. Set on
+    # the row directly: PATCH /api/meetings/{n} updates a scheduled meeting
+    # and 422s on a settings-only body, so sending one here would have
+    # quietly relied on the default being True rather than asserting it.
+    _set_waiting_room(number, True)
 
     guests = []
     for i in range(4):
@@ -282,11 +298,7 @@ def test_denying_a_guest_is_one_transaction(client, count_sessions):
 
     token, meeting, host = _meeting_with_host(client)
     number = meeting["meeting_number"]
-    client.patch(
-        f"/api/meetings/{number}",
-        json={"settings": {"waiting_room": True}},
-        headers=auth_header(token),
-    )
+    _set_waiting_room(number, True)
     guest = client.post(
         f"/api/meetings/{number}/join",
         json={"display_name": "Unwanted", "passcode": meeting.get("passcode")},
