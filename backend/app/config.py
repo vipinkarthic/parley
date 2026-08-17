@@ -94,6 +94,16 @@ DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
 DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "280"))
 
+# --- Media plane (Phase 4) -------------------------------------------------
+# The mesh is O(n^2) in uploads, so the ceiling is a client CPU and uplink
+# limit, not a server one. ROOM_CAP is the number the server refuses to seat
+# past; VIDEO_BUDGET is how many remote videos a client subscribes to at once.
+#
+# ROOM_CAP is a placeholder until Phase 5 measures where video actually
+# collapses. Publishing a measured limit is defensible; hoping is not.
+ROOM_CAP = int(os.getenv("ROOM_CAP", "12"))
+VIDEO_BUDGET = int(os.getenv("VIDEO_BUDGET", "5"))
+
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))
 
