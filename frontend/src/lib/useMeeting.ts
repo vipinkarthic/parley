@@ -240,11 +240,15 @@ export function useMeeting(opts: UseMeetingOptions) {
   // closure and from timers, and none of it should re-render anything.
   //
   //   rankRef      the server's authoritative ordering, most deserving first
-  //   wantedRef    peers whose camera WE have asked for
+  //   toldRef      what we last told each peer about wanting their camera.
+  //                A map rather than a set of wanted ids, because "not in
+  //                the set" and "told to stop" are different things: a peer
+  //                we never wanted has never been told anything, and a
+  //                sender's default is to send.
   //   wantersRef   peers who have asked for OURS (drives the encoder caps)
   //   sharingRemote  peers currently screensharing - always subscribed
   const rankRef = useRef<number[]>([]);
-  const wantedRef = useRef<Set<number>>(new Set());
+  const toldRef = useRef<Map<number, boolean>>(new Map());
   const wantersRef = useRef<Set<number>>(new Set());
   const sharingRemoteRef = useRef<Set<number>>(new Set());
   const pinnedRef = useRef<number | "me" | null>(pinnedId);
@@ -319,7 +323,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       pcsRef.current.delete(id);
     }
     wantersRef.current.delete(id);
-    wantedRef.current.delete(id);
+    toldRef.current.delete(id);
     sharingRemoteRef.current.delete(id);
     setPeers((prev) => prev.filter((p) => p.id !== id));
   }, []);
@@ -412,14 +416,27 @@ export function useMeeting(opts: UseMeetingOptions) {
       }
     }
 
-    const previous = wantedRef.current;
-    for (const id of Array.from(desired)) {
-      if (!previous.has(id)) send({ type: "video-request", to: id, want: true });
+    // Diffed against what each peer was last *told*, over every connected
+    // peer - not against the previous desired set.
+    //
+    // Getting this wrong made the whole feature inert, and it took real
+    // browsers to notice: diffing desired-against-previous only ever emits
+    // want:false for a peer that was in the set and fell out. A peer who
+    // was never in it is never told anything at all, and since a sender
+    // defaults to sending, it streams forever. Seven peers with a budget of
+    // five produced 35 want:true, zero want:false, and not one dropped
+    // track.
+    const told = toldRef.current;
+    for (const id of Array.from(pcsRef.current.keys())) {
+      const want = desired.has(id);
+      if (told.get(id) !== want) {
+        send({ type: "video-request", to: id, want });
+        told.set(id, want);
+      }
     }
-    for (const id of Array.from(previous)) {
-      if (!desired.has(id)) send({ type: "video-request", to: id, want: false });
+    for (const id of Array.from(told.keys())) {
+      if (!pcsRef.current.has(id)) told.delete(id);
     }
-    wantedRef.current = desired;
   }, [send, videoBudget]);
 
   useEffect(() => {
@@ -961,7 +978,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       // subscription is void. Cleared here rather than remembered, so the
       // recompute that follows the next `peers` frame re-asks from nothing
       // instead of diffing against a set that no longer exists.
-      wantedRef.current.clear();
+      toldRef.current.clear();
       wantersRef.current.clear();
       pcsRef.current.forEach((box) => {
         box.pc.onicecandidate = null;
