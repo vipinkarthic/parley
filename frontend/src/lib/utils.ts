@@ -87,7 +87,15 @@ export function invitationText(m: {
 }
 
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
+  // Parenthetical suffixes are labels, not names. Guests are stored as
+  // "Demo Two (Guest)", so taking the first letter of the last word gave
+  // them an avatar reading "D(" - visible on every tile in a meeting.
+  const parts = name
+    .replace(/\([^)]*\)/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }

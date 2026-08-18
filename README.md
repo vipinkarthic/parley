@@ -8,6 +8,36 @@ Media is peer-to-peer WebRTC; the server only relays signalling and app events.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
+<details>
+<summary>More screenshots</summary>
+
+**In a meeting** — cameras off here, so the tiles show avatars; the control
+bar carries mute, video, participants, chat, share, reactions, raised hands,
+speaker view and the host-only controls.
+
+![In a meeting](docs/screenshots/meeting.png)
+
+**Prejoin** — device check and a name before entering the room.
+
+![Prejoin](docs/screenshots/prejoin.png)
+
+**Scheduling**
+
+![Schedule a meeting](docs/screenshots/schedule.png)
+
+**Signup and email verification** — the code is shown on screen only because
+this is a development build with SMTP disabled; with credentials configured
+it is emailed and never rendered.
+
+![Signup](docs/screenshots/signup.png)
+![Verify your email](docs/screenshots/signup-otp.png)
+
+</details>
+
+> Screenshots are generated, not hand-taken: `backend/tools/screenshots.py`
+> drives headless Chrome at 1440x900 against a local instance using the demo
+> accounts. Re-run it after a UI change rather than retaking them by hand.
+
 ---
 
 ## Tech Stack
