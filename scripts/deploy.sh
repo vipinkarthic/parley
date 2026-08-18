@@ -65,6 +65,16 @@ ok "no test variable is aimed at production"
 [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty - commit or stash first"
 ok "working tree is clean"
 
+# `git checkout main` cannot work from a linked worktree while main is
+# checked out in the primary one - git refuses, correctly. Catch it here with
+# a useful sentence rather than four steps later with git's.
+if [[ -f .git ]]; then
+  PRIMARY="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+  die "this is a linked worktree. Run the deploy from the primary checkout:
+         cd $PRIMARY && scripts/deploy.sh"
+fi
+ok "running from the primary checkout"
+
 git rev-parse --verify "$BRANCH" >/dev/null 2>&1 || die "branch $BRANCH not found"
 BASE="$(git merge-base "$TARGET" "$BRANCH")"
 if [[ "$BASE" != "$(git rev-parse "$TARGET")" ]]; then
@@ -75,21 +85,30 @@ ok "$BRANCH fast-forwards $TARGET ($(git rev-list --count "$TARGET..$BRANCH") co
 # ---------------------------------------------------------------------------
 step "2. Tests, against SQLite (never against production)"
 # ---------------------------------------------------------------------------
-if [[ -x backend/.venv/bin/python ]]; then
-  PY=backend/.venv/bin/python
+if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/python" ]]; then
+  PY="$VIRTUAL_ENV/bin/python"
+elif [[ -x backend/.venv/bin/python ]]; then
+  PY="$PWD/backend/.venv/bin/python"
 elif [[ -x .venv/bin/python ]]; then
-  PY=.venv/bin/python
+  PY="$PWD/.venv/bin/python"
 else
   PY="$(command -v python3 || true)"
 fi
 [[ -n "$PY" ]] || die "no python found"
+
+# A python without alembic gets as far as the migration step and dies there,
+# which is the worst possible place to find out. Check now.
+"$PY" -c "import alembic, sqlalchemy" 2>/dev/null \
+  || die "$PY cannot import alembic/sqlalchemy.
+         Use the backend virtualenv:  source backend/.venv/bin/activate"
+ok "python: $PY"
 
 if (( DRY_RUN )); then
   printf '  would run: pytest in backend/\n'
 else
   ( cd backend && env -u PARLEY_TEST_ALLOW_REMOTE \
       TEST_DATABASE_URL="sqlite:///$(mktemp -u /tmp/parley_deploy_XXXX.db)" \
-      "../$PY" -m pytest -q ) || die "tests failed - not deploying"
+      "$PY" -m pytest -q ) || die "tests failed - not deploying"
 fi
 ok "tests green"
 
@@ -101,7 +120,7 @@ if (( DRY_RUN )); then
   printf '    would run: alembic current\n'
 else
   ( cd backend && DATABASE_URL="$PARLEY_PROD_DATABASE_URL" \
-      "../$PY" -m alembic current 2>&1 | sed 's/^/    /' )
+      "$PY" -m alembic current 2>&1 | sed 's/^/    /' )
 fi
 
 if (( ! DRY_RUN )); then
@@ -114,7 +133,7 @@ if (( DRY_RUN )); then
   printf '  would run: alembic upgrade head\n'
 else
   ( cd backend && DATABASE_URL="$PARLEY_PROD_DATABASE_URL" \
-      "../$PY" -m alembic upgrade head ) || die "migration failed - nothing has been pushed"
+      "$PY" -m alembic upgrade head ) || die "migration failed - nothing has been pushed"
 fi
 ok "production schema is at head"
 echo "  rollback if needed:  cd backend && DATABASE_URL=\"\$PARLEY_PROD_DATABASE_URL\" $PY -m alembic downgrade -1"
