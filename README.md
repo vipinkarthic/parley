@@ -499,23 +499,50 @@ Two things raise the ceiling without one, and both ship:
   one receiver, 200 kbps and quarter framerate past six - with H.264
   preferred so a hardware encoder can do the work.
 
-**The room cap is 12, and 12 is not yet a measured number.** It is enforced
-server-side, on both the join endpoint and the websocket, so it is a real
-limit rather than an intention - but it is a placeholder standing in until
-the ramp below has been run. Do not cite it as a measured capacity.
+**The room cap is 10, and it is measured.** It is enforced server-side on
+both the join endpoint and the websocket, so it is a real limit rather than
+an intention.
 
-**What has actually been measured on the media plane:** one rung. Three
-peers, real headless Chrome, real mesh, on a 20-core i7-12700H:
+Ramped 2 → 12 real headless Chrome peers on a 20-core i7-12700H
+(`backend/tools/loadtest.py`, 2026-09-11):
 
-| peers | uplink/peer | downlink/peer | sent | outbound streams |
-|---|---|---|---|---|
-| 3 | 484 kbps | 484 kbps | 320p @ 19.8 fps | 6 |
+| peers | uplink/peer | downlink/peer | sent video | outbound streams | CPU per peer | quality limited by |
+|---|---|---|---|---|---|---|
+| 2 | 343 kbps | 343 kbps | 480p @ 19.5 fps | 2 | 25% of a core | none |
+| 4 | 738 kbps | 738 kbps | 320p @ 19.9 fps | 12 | 42% | none |
+| 6 | 845 kbps | 845 kbps | 240p @ 19.7 fps | 30 | 53% | none |
+| 8 | 500 kbps | 500 kbps | 178p @ 13.2 fps | 49 | 60% | none |
+| 10 | 490 kbps | 456 kbps | 173p @ 13.4 fps | 81 | 83% | none |
+| 12 | 486 kbps | 486 kbps | 166p @ 14.0 fps | 99 | 98% | bandwidth, 2 of 132 |
 
-That is the shape working - six streams is exactly 3x2, and the resolution
-and framerate are the encoder tier for a two-receiver sender - but three
-peers is not where a mesh gets into trouble, so it says nothing about the
-ceiling. **The ramp to 12 has not been run.** The harness for it is
-committed at `backend/tools/loadtest.py`; see *Measuring it yourself* below.
+**The uplink column is the result.** In an unpaged mesh a participant's
+upload grows linearly with the room: at 6 peers it was already 845 kbps and
+on that trend 12 peers would be roughly 1.9 Mbps. Instead it *stops growing*
+at eight — 500, 490, 486 kbps — because past the video budget each
+additional participant adds a subscriber to someone else, not another
+encode to everybody. Stream counts say the same thing: 49 where an unpaged
+mesh would carry 56, and 99 where it would carry 132.
+
+**Video degrades by design, and it is not the same thing as collapse.** The
+480p → 320p → 240p → 170p staircase is the encoder tiers doing exactly what
+they are configured to do as the number of receivers grows.
+`qualityLimitationReason` stays `none` all the way to 12 peers, where two of
+132 streams finally report `bandwidth` — so the encoders are obeying a cap,
+not failing to meet one.
+
+**Why 10 and not 12.** Ten is the last rung with headroom on both
+constraints that actually bind: a participant needs 83% of one CPU core
+rather than 98%, and no stream has hit a bandwidth limit yet. Twelve works,
+and works better than the plan assumed it would, but leaves a participant
+nothing spare. **Video at the cap is about 180p** — that is small, and it is
+the honest price of a mesh at that size.
+
+**A property of active-speaker paging worth knowing.** Clients all derive
+their subscriptions from the same server ranking, so they all pick the *same*
+top-K. Load therefore concentrates rather than spreads: the few people being
+listened to fan out to the whole room, and everyone else sends nothing. That
+is the correct behaviour and it is what makes the saving large, but it means
+a sender's cost depends on how interesting they are, not on room size alone.
 
 One caveat that applies to any number this harness produces: every peer runs
 on one machine. Bitrate figures transfer directly, because a peer's uplink
@@ -619,7 +646,15 @@ real prejoin screen, and reports uplink, downlink, sent resolution and
 framerate, outbound stream count, and CPU per rung. Collapse shows up as
 resolution and framerate falling while `qualityLimitationReason` turns to
 `cpu` or `bandwidth` - a mesh under strain does not stop, it quietly sends
-160x120 at 4 fps. **Set `ROOM_CAP` from where that happens.**
+160x120 at 4 fps. That is how `ROOM_CAP` was set; re-run it on weaker
+hardware and expect a lower number.
+
+`tools/verify_paging.py` is the functional companion. It wraps
+`RTCPeerConnection`, `setLocalDescription`, `setRemoteDescription`,
+`RTCRtpSender.replaceTrack` and `WebSocket` before any application script
+runs, then checks that every client agrees on the ranking, that tracks are
+actually dropped, that swaps happen with **zero** SDP exchange, and that no
+transceiver direction is ever flipped.
 
 ---
 

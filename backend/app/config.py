@@ -99,9 +99,20 @@ DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "280"))
 # limit, not a server one. ROOM_CAP is the number the server refuses to seat
 # past; VIDEO_BUDGET is how many remote videos a client subscribes to at once.
 #
-# ROOM_CAP is a placeholder until Phase 5 measures where video actually
-# collapses. Publishing a measured limit is defensible; hoping is not.
-ROOM_CAP = int(os.getenv("ROOM_CAP", "12"))
+# ROOM_CAP is measured, not guessed. Ramped 2->12 real headless Chrome peers
+# on a 20-core i7-12700H (backend/tools/loadtest.py, 2026-09-11):
+#
+#   peers   up/peer   sent      CPU/peer   quality limited by
+#   6       845 kbps  240p@20   53%        none
+#   8       500 kbps  178p@13   60%        none
+#   10      490 kbps  173p@13   83%        none
+#   12      486 kbps  166p@14   98%        bandwidth on 2 of 132 streams
+#
+# 10 is the last rung with headroom. At 12 a participant needs essentially a
+# full CPU core and the first bandwidth limitation appears; at 10 there is
+# still margin on both. Video at the cap is ~180p - small, and the README
+# says so rather than implying otherwise.
+ROOM_CAP = int(os.getenv("ROOM_CAP", "10"))
 VIDEO_BUDGET = int(os.getenv("VIDEO_BUDGET", "5"))
 
 JWT_ALGORITHM = "HS256"
