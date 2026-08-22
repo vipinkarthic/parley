@@ -1,11 +1,25 @@
 # Render.com blueprint for the FastAPI backend.
 # Deploy: New + -> Blueprint, point at this repo (Render reads this file).
-# NOTE: `name` was zoom-clone-api. Render treats a renamed service in a
-# blueprint as a NEW service - rename it in the dashboard first, or expect a
-# fresh service (new URL, env vars not carried over) on the next sync.
+#
+# `name` MUST match the live service, because Render treats a renamed service
+# in a blueprint as a brand new one - new URL, no environment variables
+# carried over. That already happened once: this file said `parley-api` while
+# the live service was named differently, and a sync on 2026-09-09 created a
+# second web service (`parley-api`, https://parley-api-jtza.onrender.com)
+# which has no env vars and has been stuck in update_failed ever since. It
+# still auto-deploys from main, so it fails again on every push.
+#
+# The live service is `parley-meeting`, which serves
+# https://zoom-clone-api-in8u.onrender.com - the URL baked into the deployed
+# frontend bundle and fronted by parleyapi.vipinkarthic.com. The name is
+# historical; the URL is what matters and cannot be changed.
+#
+# So this file now names the real service. Before syncing the blueprint,
+# delete or suspend the orphaned `parley-api` service, or a sync will simply
+# feed the broken duplicate again.
 services:
   - type: web
-    name: parley-api
+    name: parley-meeting
     runtime: python
     rootDir: backend
     plan: free
