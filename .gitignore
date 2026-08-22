@@ -19,6 +19,8 @@ backend/*.sqlite3
 .env
 .env.local
 .env*.local
+# Verified TURN credentials, written by tools/turn_setup.py.
+.env.turn
 
 # OS / editor
 .DS_Store
