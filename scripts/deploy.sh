@@ -87,12 +87,33 @@ if [[ -f .git ]]; then
 fi
 ok "running from the primary checkout"
 
-git rev-parse --verify "$BRANCH" >/dev/null 2>&1 || die "branch $BRANCH not found"
-BASE="$(git merge-base "$TARGET" "$BRANCH")"
-if [[ "$BASE" != "$(git rev-parse "$TARGET")" ]]; then
-  die "$BRANCH is not a fast-forward of $TARGET. Rebase or merge by hand, deliberately."
+# Three states are fine and only one is not. The branch may still be ahead
+# (merge it), it may already be merged (nothing to do - which is the normal
+# state once someone has run the merge by hand, and the earlier version of
+# this check called that "not a fast-forward" and refused to deploy), or the
+# branch may not exist at all because the work has long since landed.
+MERGE_NEEDED=0
+if ! git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
+  ok "no $BRANCH branch; deploying $TARGET as it stands"
+else
+  BRANCH_SHA="$(git rev-parse "$BRANCH")"
+  TARGET_SHA="$(git rev-parse "$TARGET")"
+  BASE="$(git merge-base "$TARGET" "$BRANCH")"
+  if [[ "$BRANCH_SHA" == "$TARGET_SHA" ]]; then
+    ok "$TARGET is already at $BRANCH; nothing to merge"
+  elif [[ "$BASE" == "$BRANCH_SHA" ]]; then
+    ok "$BRANCH is already contained in $TARGET; nothing to merge"
+  elif [[ "$BASE" == "$TARGET_SHA" ]]; then
+    MERGE_NEEDED=1
+    ok "$BRANCH fast-forwards $TARGET ($(git rev-list --count "$TARGET..$BRANCH") commits)"
+  else
+    die "$BRANCH and $TARGET have diverged - $(git rev-list --count "$TARGET..$BRANCH") \
+ahead, $(git rev-list --count "$BRANCH..$TARGET") behind. Reconcile them by hand, deliberately."
+  fi
 fi
-ok "$BRANCH fast-forwards $TARGET ($(git rev-list --count "$TARGET..$BRANCH") commits)"
+
+UNPUSHED="$(git rev-list --count "origin/$TARGET..$TARGET" 2>/dev/null || echo '?')"
+ok "$UNPUSHED commit(s) on $TARGET not yet on origin"
 
 # ---------------------------------------------------------------------------
 step "2. Tests, against SQLite (never against production)"
@@ -154,14 +175,22 @@ echo "  rollback if needed:  cd backend && DATABASE_URL=\"\$PARLEY_PROD_DATABASE
 step "4. Merge and push"
 # ---------------------------------------------------------------------------
 if (( ! DRY_RUN )); then
-  echo "  about to fast-forward $TARGET to $BRANCH and push to origin."
+  if (( MERGE_NEEDED )); then
+    echo "  about to fast-forward $TARGET to $BRANCH and push to origin."
+  else
+    echo "  about to push $UNPUSHED commit(s) on $TARGET to origin."
+  fi
   read -r -p "  type 'ship' to continue: " reply
   [[ "$reply" == "ship" ]] || die "aborted before the merge (the migration HAS been applied; \
 re-running this script will skip it as already-at-head)"
 fi
 
 run "git checkout $TARGET"
-run "git merge --ff-only $BRANCH"
+if (( MERGE_NEEDED )); then
+  run "git merge --ff-only $BRANCH"
+else
+  echo "  (nothing to merge - $TARGET already carries the work)"
+fi
 run "git push origin $TARGET"
 ok "pushed - Render and Vercel will now build"
 
