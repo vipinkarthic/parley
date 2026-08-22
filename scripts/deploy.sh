@@ -189,9 +189,13 @@ cat <<'NOTE'
     TURN_USERNAME and TURN_CREDENTIAL in Render. No rebuild needed.
     Until this is done, peers behind symmetric NAT cannot connect at all.
 
-  - Do NOT sync render.yaml in Render's dashboard. It names 'parley-api';
-    the live service is 'zoom-clone-api-in8u'. Syncing creates a SECOND
-    service with a new URL and no environment variables.
+  - Delete or suspend the orphaned 'parley-api' Render service
+    (https://parley-api-jtza.onrender.com). A blueprint sync on 2026-09-09
+    created it; it has no environment variables, sits in update_failed, and
+    still auto-deploys from main - so it will fail again on this push. It is
+    noise, and it competes for the account's 750 free instance-hours.
+    render.yaml now names the real service ('parley-meeting'), but a
+    blueprint cannot delete a service it did not create.
 
   - Rotate the Neon API key if it was ever pasted into a chat.
 NOTE
