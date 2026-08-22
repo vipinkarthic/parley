@@ -80,18 +80,30 @@ def fetch(app: str, key: str) -> list[dict]:
     return body
 
 
-def split_hostport(url: str) -> tuple[str, int] | None:
-    """turn:host:port?transport=tcp -> (host, port). None for stun/turns."""
-    if not url.startswith("turn:"):
-        return None
-    rest = url[len("turn:"):].split("?")[0]
-    if ":" not in rest:
-        return None
-    host, _, port = rest.rpartition(":")
-    try:
-        return host, int(port)
-    except ValueError:
-        return None
+def parse_url(url: str) -> tuple[str, int, list[str]] | None:
+    """turn(s):host:port[?transport=] -> (host, port, probe flags).
+
+    The transport is not cosmetic. A `turn:` URL with no ?transport= is UDP
+    in WebRTC, and testing it over TCP proves nothing - which is how
+    turn:...:443 first came back "failed" here when it works perfectly over
+    UDP. A `turns:` URL needs the TLS handshake, which is itself part of the
+    test.
+    """
+    for scheme, flags in (("turns:", ["--tls"]), ("turn:", [])):
+        if url.startswith(scheme):
+            rest = url[len(scheme):]
+            query = rest.split("?", 1)[1] if "?" in rest else ""
+            rest = rest.split("?")[0]
+            if ":" not in rest:
+                return None
+            host, _, port = rest.rpartition(":")
+            if scheme == "turn:" and "transport=tcp" not in query:
+                flags = ["--udp"]
+            try:
+                return host, int(port), flags
+            except ValueError:
+                return None
+    return None
 
 
 def main() -> None:
@@ -139,19 +151,21 @@ def main() -> None:
     probe = BACKEND_ROOT / "tools" / "turn_probe.py"
     working: list[str] = []
     for url in turn_urls:
-        hp = split_hostport(url)
-        if hp is None:
-            print(f"  {url:<52} skipped (turns:/TLS - browser-only path)")
+        parsed = parse_url(url)
+        if parsed is None:
+            print(f"  {url:<52} skipped (unparseable)")
             continue
-        host, port = hp
+        host, port, flags = parsed
         res = subprocess.run(
-            [sys.executable, str(probe), host, str(port), username, credential],
-            capture_output=True, text=True, timeout=60,
+            [sys.executable, str(probe), host, str(port), username, credential,
+             *flags],
+            capture_output=True, text=True, timeout=90,
         )
         ok = res.returncode == 0
         detail = (res.stdout or res.stderr).strip().splitlines()
         tail = detail[-1].strip() if detail else ""
-        print(f"  {url:<52} {'ALLOCATED' if ok else 'failed'}  {tail[:60]}")
+        how = "tls" if "--tls" in flags else ("udp" if "--udp" in flags else "tcp")
+        print(f"  {url:<52} [{how}] {'ALLOCATED' if ok else 'FAILED'}  {tail[:52]}")
         if ok:
             working.append(url)
 

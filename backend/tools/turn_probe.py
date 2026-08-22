@@ -5,7 +5,10 @@ actually accept us" - which is the difference between fixing the no-TURN bug
 and only appearing to. Run this against a new TURN account *before* putting
 it in Render's environment.
 
-    python tools/turn_probe.py <host> <port> <username> <credential>
+    python tools/turn_probe.py <host> <port> <username> <credential> [--tls|--udp]
+
+``--tls`` is required for a turns: URL, and verifies the certificate -
+a relay a browser will reject is not a working relay.
 
 Exits 0 on a successful allocation. RFC 5766 Allocate over TCP, stdlib only,
 no dependencies.
@@ -27,6 +30,7 @@ import hashlib
 import hmac
 import os
 import socket
+import ssl
 import struct
 import sys
 
@@ -83,8 +87,52 @@ def xor_addr(v):
     return f"[ipv6]:{port}"
 
 
-def probe(host, port, user, password, timeout=15):
-    sock = socket.create_connection((host, port), timeout=timeout)
+class _UdpSock:
+    """Just enough socket interface for the exchange below, over UDP.
+
+    A `turn:` URL with no ?transport= is **UDP** in WebRTC, so testing one
+    over TCP proves nothing about it either way. Reporting such an endpoint
+    as broken because a TCP probe could not reach it would be worse than not
+    testing it - somebody would drop a working relay from the config.
+    """
+
+    def __init__(self, host, port, timeout):
+        self._addr = (host, port)
+        self._s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._s.settimeout(timeout)
+
+    def sendall(self, data):
+        self._s.sendto(data, self._addr)
+
+    def recv(self, n):
+        while True:
+            data, addr = self._s.recvfrom(n)
+            # Ignore anything not from the server we asked.
+            if addr[0] == socket.gethostbyname(self._addr[0]):
+                return data
+
+    def close(self):
+        self._s.close()
+
+
+def probe(host, port, user, password, timeout=15, tls=False, udp=False):
+    """Allocate a relay. `tls` wraps the connection, for turns: URLs.
+
+    A turns: endpoint cannot be checked without doing the TLS handshake, and
+    the handshake is itself part of what is being tested: Open Relay's
+    :443 presented a certificate that did not match its hostname, which makes
+    it unusable from a browser no matter what the TURN layer would have said.
+    Verification is left on for exactly that reason.
+    """
+    if udp:
+        sock = _UdpSock(host, port, timeout)
+    else:
+        raw = socket.create_connection((host, port), timeout=timeout)
+        if tls:
+            ctx = ssl.create_default_context()
+            sock = ctx.wrap_socket(raw, server_hostname=host)
+        else:
+            sock = raw
     try:
         txid = os.urandom(12)
         base = [attr(ATTR_REQUESTED_TRANSPORT, struct.pack("!BBBB", 17, 0, 0, 0))]
@@ -126,10 +174,19 @@ def probe(host, port, user, password, timeout=15):
 
 
 if __name__ == "__main__":
-    host, port, user, pw = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
-    print(f"TURN {host}:{port} as {user!r}")
+    flags = {"--tls", "--udp"}
+    args = [a for a in sys.argv[1:] if a not in flags]
+    tls = "--tls" in sys.argv[1:]
+    udp = "--udp" in sys.argv[1:]
+    if len(args) != 4:
+        sys.exit(__doc__)
+    host, port, user, pw = args[0], int(args[1]), args[2], args[3]
+    kind = "TURNS" if tls else ("TURN/udp" if udp else "TURN/tcp")
+    print(f"{kind} {host}:{port} as {user!r}")
     try:
-        ok, detail = probe(host, port, user, pw)
+        ok, detail = probe(host, port, user, pw, tls=tls, udp=udp)
+    except ssl.SSLCertVerificationError as exc:
+        ok, detail = False, f"TLS certificate rejected: {exc.verify_message}"
     except Exception as exc:
         ok, detail = False, f"{type(exc).__name__}: {exc}"
     print(f"  {'ALLOCATED   ' if ok else 'FAILED      '}: {detail}")
