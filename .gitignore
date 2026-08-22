@@ -39,3 +39,7 @@ PARLEY_PLAN.md
 
 # Test artifacts
 backend/.pytest_cache/
+
+# Git worktrees created for phase branches. These are checkouts of
+# this same repository - committing them would nest the repo in itself.
+.claude/worktrees/

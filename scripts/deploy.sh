@@ -62,8 +62,20 @@ fi
   && die "PARLEY_TEST_ALLOW_REMOTE=1 is set. Unset it - it is what lets the suite drop a remote schema."
 ok "no test variable is aimed at production"
 
-[[ -z "$(git status --porcelain)" ]] || die "working tree is dirty - commit or stash first"
-ok "working tree is clean"
+# Tracked modifications only. An untracked file cannot change what gets
+# merged or pushed, and this repo legitimately carries untracked worktrees
+# under .claude/ - failing on those blocks the deploy for no reason. They are
+# still worth mentioning, in case one is work somebody meant to commit.
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  git status --short --untracked-files=no | sed 's/^/    /'
+  die "tracked files are modified - commit or stash first"
+fi
+UNTRACKED="$(git ls-files --others --exclude-standard | head -5)"
+if [[ -n "$UNTRACKED" ]]; then
+  warn "untracked files present (ignored for this check):"
+  printf '       %s\n' $UNTRACKED
+fi
+ok "no tracked modifications"
 
 # `git checkout main` cannot work from a linked worktree while main is
 # checked out in the primary one - git refuses, correctly. Catch it here with
