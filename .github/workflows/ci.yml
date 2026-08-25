@@ -59,8 +59,11 @@ jobs:
       postgres:
         image: postgres:16
         env:
+          # trust auth: the container is reachable only from this job, and a
+          # throwaway password in a workflow file is a secret-scanner finding
+          # with no security value to offset it.
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: parley_test
         ports:
           - 5432:5432
@@ -89,19 +92,11 @@ jobs:
         # localhost needs no PARLEY_TEST_ALLOW_REMOTE: the conftest guard only
         # demands that opt-in for a remote host, which a service container is not.
         #
-        # The URL is assembled here rather than written out in full. These are
-        # throwaway service-container credentials, but a literal
-        # user:password@host string trips secret scanners, and a CI run that
-        # cries wolf is worse than one that says nothing.
+        # No password anywhere: the service container uses trust auth, so the
+        # URL carries a username and nothing to scan for.
         env:
-          PGHOST: localhost
-          PGPORT: "5432"
-          PGDATABASE: parley_test
-          PGUSER: postgres
-          PGPASSWORD: postgres
-        run: |
-          export TEST_DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
-          pytest -q
+          TEST_DATABASE_URL: postgresql://postgres@localhost:5432/parley_test
+        run: pytest -q
 
   # --------------------------------------------------------------------------
   # Type-check and lint the frontend. Cheap, and it is the only thing that
