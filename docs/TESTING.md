@@ -34,7 +34,7 @@ cd backend && pytest -q
 
 # API suite, Postgres - the same tests, the production engine
 cd backend
-TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/parley_test pytest -q
+TEST_DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/parley_test pytest -q
 
 # End-to-end. Playwright starts the backend and the frontend itself.
 cd e2e
