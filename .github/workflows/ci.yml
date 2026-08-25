@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a PR makes the previous run's answer irrelevant, so stop it
+# rather than paying for two answers about different commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # The API suite against SQLite. Fast, and the one that gates everything else.
+  # --------------------------------------------------------------------------
+  api-sqlite:
+    name: API tests (SQLite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest -q
+
+  # --------------------------------------------------------------------------
+  # The identical suite against Postgres.
+  #
+  # Not redundant: the suite is engine-agnostic by design, and running it twice
+  # is what makes it a cutover check. Production is Postgres on Neon, so a test
+  # that only ever sees SQLite cannot catch a dialect difference - which is the
+  # exact class of bug the Phase 1 migration was most likely to leave behind.
+  # --------------------------------------------------------------------------
+  api-postgres:
+    name: API tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: parley_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest against Postgres
+        working-directory: backend
+        # localhost needs no PARLEY_TEST_ALLOW_REMOTE: the conftest guard only
+        # demands that opt-in for a remote host, which a service container is not.
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/parley_test
+        run: pytest -q
+
+  # --------------------------------------------------------------------------
+  # Type-check and lint the frontend. Cheap, and it is the only thing that
+  # would catch a broken build before the e2e job spends five minutes on it.
+  # --------------------------------------------------------------------------
+  frontend-checks:
+    name: Frontend lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+  # --------------------------------------------------------------------------
+  # The browser flows. Playwright starts both servers itself (see
+  # e2e/playwright.config.ts), so this job only has to supply the runtimes.
+  # --------------------------------------------------------------------------
+  e2e:
+    name: End-to-end flows (Firefox)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [api-sqlite]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        # The application's own requirements, not the dev ones: this job runs
+        # the real server rather than the test client.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-firefox-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Firefox
+        working-directory: e2e
+        # --with-deps every time: the cache restores the browser but not the
+        # system libraries it links against, and those live outside the path.
+        run: npx playwright install --with-deps firefox
+
+      - name: Run Playwright
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
