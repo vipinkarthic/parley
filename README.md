@@ -343,14 +343,39 @@ every deploy.
 
 ### Tests
 
+**API suite** - 173 tests over the HTTP API and the WebSocket signalling hub:
+
 ```bash
+cd backend
 pip install -r requirements-dev.txt
 pytest                                          # SQLite, offline
 TEST_DATABASE_URL=postgresql://... pytest       # against real Postgres
 ```
 
 The suite builds its schema by running the migrations, so a green run also
-proves `alembic upgrade head` works from an empty database.
+proves `alembic upgrade head` works from an empty database. It is
+engine-agnostic on purpose: running it against SQLite and then Postgres is
+what makes it a cutover check rather than a one-off.
+
+**End-to-end suite** - 12 Playwright tests over three critical flows
+(signup -> OTP, create -> join, host controls):
+
+```bash
+cd e2e
+npm ci
+npx playwright install firefox
+npx playwright test
+```
+
+No running server is needed. Playwright starts a throwaway SQLite backend and
+a production build of the frontend on loopback ports of their own, and tears
+both down with the run. Media is synthetic, and no email is ever sent.
+
+**CI** runs all of it - both engines, the frontend type-check and lint, and the
+browser flows - on every pull request: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+Full coverage notes, measured results, and an honest list of what is *not*
+tested: [`docs/TESTING.md`](docs/TESTING.md).
 
 **Seeded demo accounts** are created automatically on startup so you can log in
 right away (no OTP needed) - all share the password **`demo1234`**:
