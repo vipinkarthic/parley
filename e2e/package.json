@@ -1,0 +1,15 @@
+{
+  "name": "parley-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end flows for Parley, driven by Playwright against a throwaway backend and a production build of the frontend.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "install-browsers": "playwright install firefox"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}
