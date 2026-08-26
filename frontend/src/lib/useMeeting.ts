@@ -437,11 +437,36 @@ export function useMeeting(opts: UseMeetingOptions) {
       const existing = pcsRef.current.get(peerId);
       if (existing) return existing.pc;
 
+      // A bad ICE server entry makes this THROW, not degrade - and a throw
+      // here takes the whole meeting down rather than one relay path.
+      //
+      // fetchIceConfig already falls back to STUN_ONLY, but only when the
+      // *fetch* fails. A successful fetch of a malformed payload sails past
+      // it, which is exactly what happened in production on 2026-09-14: a
+      // TURN_URLS value had lost the "?" from "?transport=tcp" on its way
+      // through a shell, and the constructor rejected it outright - Chrome
+      // with `SyntaxError: Invalid port`, Firefox with `NS_ERROR_UNEXPECTED`.
+      // Video was dead, not merely unrelayed.
+      //
+      // So: fall back to STUN and carry on. Peers with a direct path still
+      // connect; peers behind symmetric NAT still cannot, which is the same
+      // position as having no relay configured at all. Degraded beats dead.
+      // The fallback is latched into the ref so the next peer does not repeat
+      // a construction already known to fail.
       const cfg = iceConfigRef.current;
-      const pc = new RTCPeerConnection({
-        iceServers: cfg.iceServers,
-        iceCandidatePoolSize: cfg.iceCandidatePoolSize,
-      });
+      let pc: RTCPeerConnection;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: cfg.iceServers,
+          iceCandidatePoolSize: cfg.iceCandidatePoolSize,
+        });
+      } catch {
+        iceConfigRef.current = STUN_ONLY;
+        pc = new RTCPeerConnection({
+          iceServers: STUN_ONLY.iceServers,
+          iceCandidatePoolSize: cfg.iceCandidatePoolSize,
+        });
+      }
       const box: PeerBox = {
         pc,
         streams: new Map(),
