@@ -10,6 +10,7 @@ so nothing can be spoofed from the client.
 """
 import asyncio
 import json
+import logging
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -19,6 +20,8 @@ from . import crud, models
 from .config import ROOM_CAP, VIDEO_BUDGET
 from .database import SessionLocal
 from .speakers import RoomSpeakers
+
+logger = logging.getLogger("parley.ws")
 
 router = APIRouter()
 
@@ -57,6 +60,12 @@ async def _fan_out(coros) -> None:
 
 
 async def _close_quietly(ws: WebSocket, code: int) -> None:
+    """Close a socket that may already be gone.
+
+    Deliberately silent, unlike the handler's catch-all: the only thing that
+    reaches here is a socket the far end closed first, and there is nothing
+    to do about it and nothing worth logging.
+    """
     try:
         await ws.close(code=code)
     except Exception:
@@ -817,9 +826,18 @@ async def meeting_socket(websocket: WebSocket, number: str):
             elif mtype == "ask-unmute" and info["isHost"] and "target" in data:
                 await hub.send_to(number, int(data["target"]), {"type": "ask-unmute"})
     except WebSocketDisconnect:
+        # Ordinary: the tab closed, or the network went away. The teardown
+        # below is the whole response.
         pass
     except Exception:
-        pass
+        # Anything else is a bug in the handler, and the socket is about to be
+        # torn down either way. Logged rather than discarded: this used to be
+        # a bare `pass`, so a failure here left no trace anywhere - no
+        # traceback, no request id, nothing to find afterwards.
+        logger.exception(
+            "signalling handler failed",
+            extra={"meeting": number, "participant": pid},
+        )
     finally:
         # Only tear down if this socket still owns the participant slot. If a
         # reconnect displaced us, the live socket is already registered under

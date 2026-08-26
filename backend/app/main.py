@@ -137,8 +137,9 @@ async def request_context(request: Request, call_next):
     otherwise one is minted. It goes back out on the response, which is what
     makes an error a user reports findable in the logs.
 
-    HTTP only - ASGI http middleware is never invoked for a websocket scope,
-    and the signalling socket does its own logging.
+    HTTP only: ASGI http middleware is never invoked for a websocket scope,
+    so the signalling socket gets no request id and no per-request line from
+    here. It logs its own failures under `parley.ws`.
     """
     incoming = (request.headers.get(REQUEST_ID_HEADER) or "").strip()
     request_id = incoming[:64] or uuid.uuid4().hex[:12]
