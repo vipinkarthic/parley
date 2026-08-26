@@ -63,8 +63,8 @@ fi
 ok "no test variable is aimed at production"
 
 # Tracked modifications only. An untracked file cannot change what gets
-# merged or pushed, and this repo legitimately carries untracked worktrees
-# under .claude/ - failing on those blocks the deploy for no reason. They are
+# merged or pushed, and this repo legitimately carries untracked worktree
+# checkouts - failing on those blocks the deploy for no reason. They are
 # still worth mentioning, in case one is work somebody meant to commit.
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   git status --short --untracked-files=no | sed 's/^/    /'
