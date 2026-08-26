@@ -141,6 +141,13 @@ class MeetingSettings(BaseModel):
     allow_reactions: bool
 
 
+# The settings keys, derived from the model that defines them rather than
+# retyped. ws.py and crud.py both used to carry their own copy - a tuple in
+# one, a set in the other - so adding an eleventh setting meant remembering
+# two more places that nothing would have caught you missing.
+SETTING_KEYS: tuple[str, ...] = tuple(MeetingSettings.model_fields)
+
+
 class MeetingSettingsUpdate(BaseModel):
     waiting_room: bool | None = None
     locked: bool | None = None

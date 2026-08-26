@@ -370,18 +370,11 @@ def set_waiting_room(
     return meeting
 
 
-_SETTINGS_FIELDS = {
-    "waiting_room", "locked", "mute_on_entry", "join_before_host",
-    "allow_screen_share", "allow_unmute", "allow_video", "allow_rename",
-    "allow_chat", "allow_reactions",
-}
-
-
 def update_settings(
     db: Session, meeting: models.Meeting, patch: dict
 ) -> models.Meeting:
     for key, value in patch.items():
-        if key in _SETTINGS_FIELDS and value is not None:
+        if key in schemas.SETTING_KEYS and value is not None:
             setattr(meeting, key, value)
     db.commit()
     db.refresh(meeting)

@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from . import crud, models
 from .config import ROOM_CAP, VIDEO_BUDGET
 from .database import SessionLocal
+from .schemas import SETTING_KEYS
 from .speakers import RoomSpeakers
 
 logger = logging.getLogger("parley.ws")
@@ -39,13 +40,6 @@ WS_ROOM_FULL = 4006
 # RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
 # Render service, and it is not an error - the client is expected to come back.
 WS_SERVICE_RESTART = 1012
-
-
-SETTING_KEYS = (
-    "waiting_room", "locked", "mute_on_entry", "join_before_host",
-    "allow_screen_share", "allow_unmute", "allow_video", "allow_rename",
-    "allow_chat", "allow_reactions",
-)
 
 
 async def _fan_out(coros) -> None:
