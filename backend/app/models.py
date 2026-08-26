@@ -29,7 +29,7 @@ from .database import Base
 from .dbtypes import UtcDateTime
 
 
-def _now() -> datetime:
+def utcnow() -> datetime:
     """The application clock: timezone-aware UTC, always.
 
     Naive local time in a database that outlives one machine is a bug waiting
@@ -50,7 +50,7 @@ class User(Base):
     avatar_color: Mapped[str] = mapped_column(String(9), default="#0E7C74")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pmi: Mapped[str] = mapped_column(String(11), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
     pref_video_on_join: Mapped[bool] = mapped_column(Boolean, default=True)
     pref_join_muted: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -78,7 +78,7 @@ class PendingSignup(Base):
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 class Meeting(Base):
@@ -116,7 +116,7 @@ class Meeting(Base):
     )
     duration: Mapped[int] = mapped_column(Integer, default=30)
 
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
     host: Mapped["User"] = relationship(back_populates="meetings")
     participants: Mapped[list["Participant"]] = relationship(
@@ -155,7 +155,7 @@ class Participant(Base):
     # and NULLs do not collide under the unique constraint.
     join_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    joined_at: Mapped[datetime] = mapped_column(UtcDateTime, default=_now)
+    joined_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="participants")
 

@@ -87,7 +87,7 @@ class Hub:
         self.shutting_down = False
 
     def socket_count(self) -> int:
-        return sum(len(r) for r in self.rooms.values()) + sum(
+        return sum(len(room) for room in self.rooms.values()) + sum(
             len(lobby) for lobby in self.lobbies.values()
         )
 
@@ -209,8 +209,11 @@ class Hub:
 
     def waiting_list(self, number: str) -> list[dict]:
         return [
-            {"id": p["info"]["id"], "displayName": p["info"]["displayName"]}
-            for p in self.lobbies.get(number, {}).values()
+            {
+                "id": entry["info"]["id"],
+                "displayName": entry["info"]["displayName"],
+            }
+            for entry in self.lobbies.get(number, {}).values()
         ]
 
     def lobby_entries(self, number: str) -> list[dict]:
@@ -259,7 +262,9 @@ class Hub:
         await self._send_many(peers, message)
 
     async def broadcast_lobby(self, number: str, message: dict) -> None:
-        sockets = [p["ws"] for p in self.lobbies.get(number, {}).values()]
+        sockets = [
+            entry["ws"] for entry in self.lobbies.get(number, {}).values()
+        ]
         await self._send_many(sockets, message)
 
     async def notify_hosts_waiting(self, number: str) -> None:
@@ -331,8 +336,8 @@ def _do_set_admission(pids: list[int], meeting_id: str, admission: str) -> None:
             )
             .all()
         )
-        for p in rows:
-            p.admission = admission
+        for row in rows:
+            row.admission = admission
         if rows:
             db.commit()
     finally:
@@ -346,9 +351,9 @@ async def _set_admission(pids: list[int], meeting_id: str, admission: str) -> No
 def _do_set_waiting_room(meeting_id: str, on: bool) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            m.waiting_room = on
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            meeting.waiting_room = on
             db.commit()
     finally:
         db.close()
@@ -361,9 +366,9 @@ async def _set_waiting_room(meeting_id: str, on: bool) -> None:
 def _do_update_settings(meeting_id: str, patch: dict) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            crud.update_settings(db, m, patch)
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            crud.update_settings(db, meeting, patch)
     finally:
         db.close()
 
@@ -375,9 +380,9 @@ async def _update_settings(meeting_id: str, patch: dict) -> None:
 def _do_rename(meeting_id: str, pid: int, name: str) -> None:
     db = SessionLocal()
     try:
-        p = db.get(models.Participant, pid)
-        if p and p.meeting_id == meeting_id:
-            p.display_name = name
+        participant = db.get(models.Participant, pid)
+        if participant and participant.meeting_id == meeting_id:
+            participant.display_name = name
             db.commit()
     finally:
         db.close()
@@ -408,10 +413,10 @@ def _do_deny(meeting_id: str, pid: int) -> None:
     """
     db = SessionLocal()
     try:
-        p = db.get(models.Participant, pid)
-        if p and p.meeting_id == meeting_id:
-            p.admission = "denied"
-            p.is_active = False
+        participant = db.get(models.Participant, pid)
+        if participant and participant.meeting_id == meeting_id:
+            participant.admission = "denied"
+            participant.is_active = False
             db.commit()
     finally:
         db.close()
@@ -424,9 +429,9 @@ async def _deny(meeting_id: str, pid: int) -> None:
 def _do_end_meeting(meeting_id: str) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            crud.end_meeting(db, m)
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            crud.end_meeting(db, meeting)
     finally:
         db.close()
 
@@ -531,7 +536,7 @@ async def _admit(number: str, meeting_id: str, *targets: int) -> None:
     # reconnect: a guest who saw "admitted" and then reconnected into the
     # lobby because the write had not landed is a worse bug than a slow admit.
     await _set_admission(
-        [e["info"]["id"] for e in entries], meeting_id, "admitted"
+        [entry["info"]["id"] for entry in entries], meeting_id, "admitted"
     )
 
     for entry in entries:
@@ -548,7 +553,7 @@ async def _admit(number: str, meeting_id: str, *targets: int) -> None:
 
 
 def _lobby_pids(number: str) -> list[int]:
-    return [e["info"]["id"] for e in hub.lobby_entries(number)]
+    return [entry["info"]["id"] for entry in hub.lobby_entries(number)]
 
 
 @router.websocket("/ws/meetings/{number}")

@@ -6,7 +6,7 @@ from .. import crud, models, schemas
 from ..config import ROOM_CAP
 from ..database import get_db
 from ..deps import get_current_user, get_optional_user
-from ..models import _now
+from ..models import utcnow
 from ..serializers import meeting_out
 
 router = APIRouter(prefix="/api", tags=["meetings"])
@@ -17,7 +17,10 @@ def upcoming_meetings(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    return [meeting_out(db, m, user.id) for m in crud.list_upcoming(db, user.id)]
+    return [
+        meeting_out(db, meeting, user.id)
+        for meeting in crud.list_upcoming(db, user.id)
+    ]
 
 
 @router.get("/meetings/recent", response_model=list[schemas.MeetingOut])
@@ -25,7 +28,10 @@ def recent_meetings(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    return [meeting_out(db, m, user.id) for m in crud.list_recent(db, user.id)]
+    return [
+        meeting_out(db, meeting, user.id)
+        for meeting in crud.list_recent(db, user.id)
+    ]
 
 
 @router.get("/meetings", response_model=list[schemas.MeetingOut])
@@ -33,7 +39,10 @@ def all_meetings(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    return [meeting_out(db, m, user.id) for m in crud.list_all(db, user.id)]
+    return [
+        meeting_out(db, meeting, user.id)
+        for meeting in crud.list_all(db, user.id)
+    ]
 
 
 @router.post(
@@ -237,7 +246,7 @@ def join_meeting(
         and not meeting.join_before_host
         and meeting.meeting_type == "scheduled"
         and meeting.start_time is not None
-        and _now() < meeting.start_time
+        and utcnow() < meeting.start_time
     ):
         raise HTTPException(
             status_code=status.HTTP_425_TOO_EARLY,
@@ -254,7 +263,6 @@ def join_meeting(
                 ),
             )
         crud.deactivate_user_in_meeting(db, user.id, meeting.id)
-    is_host = is_owner
     if is_owner:
         admission = "admitted"
     elif meeting.waiting_room:
@@ -275,7 +283,7 @@ def join_meeting(
         db,
         meeting,
         display_name,
-        is_host=is_host,
+        is_host=is_owner,
         user_id=user.id if user else None,
         admission=admission,
         join_key=join_key,

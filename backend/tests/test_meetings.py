@@ -1,8 +1,9 @@
 """Meeting lifecycle and join-gate smoke tests.
 
 Scheduled times are always built from the application's own clock helper
-(``models._now``) rather than a hardcoded string. That keeps the tests honest
-across the timezone change: whatever ``_now()`` means, "two hours after it" is
+(``models.utcnow``) rather than a hardcoded string. That keeps the tests
+honest across the timezone change: whatever ``utcnow()`` means, "two hours
+after it" is
 still in the future and "two hours before it" is still in the past. Hardcoding
 a UTC offset here would have made these tests pass for the wrong reason.
 """
@@ -13,10 +14,10 @@ import pytest
 from conftest import auth_header, signup, unique_email
 
 
-def _now():
-    from app.models import _now as app_now
+def utcnow():
+    from app.models import utcnow as app_utcnow
 
-    return app_now()
+    return app_utcnow()
 
 
 def _iso(dt):
@@ -81,7 +82,7 @@ def test_personal_room_is_stable(client, user_token):
 
 def test_create_scheduled_meeting(client, user_token):
     token, _ = user_token
-    start = _now() + timedelta(hours=3)
+    start = utcnow() + timedelta(hours=3)
     m = create_scheduled(client, token, start_time=start, duration=45)
     assert m["meeting_type"] == "scheduled"
     assert m["status"] == "scheduled"
@@ -101,7 +102,7 @@ def test_upcoming_lists_only_this_hosts_scheduled_meetings_soonest_first(client)
     token_a, _ = signup(client, unique_email("hosta"))
     token_b, _ = signup(client, unique_email("hostb"))
 
-    base = _now()
+    base = utcnow()
     later = create_scheduled(client, token_a, start_time=base + timedelta(days=2), topic="Later")
     sooner = create_scheduled(client, token_a, start_time=base + timedelta(hours=2), topic="Sooner")
     create_scheduled(client, token_b, start_time=base + timedelta(hours=1), topic="Other host")
@@ -131,7 +132,7 @@ def test_all_meetings_is_scoped_to_the_host(client):
 
 def test_ended_meeting_moves_to_recent(client):
     token, _ = signup(client, unique_email("recent"))
-    start = _now() - timedelta(hours=2)
+    start = utcnow() - timedelta(hours=2)
     m = create_scheduled(client, token, start_time=start, topic="Already Happened")
 
     r = client.post(
@@ -235,7 +236,7 @@ def test_scheduled_meeting_rejects_an_early_guest(client):
     """The 425 gate compares now() against a stored timestamp - the other
     place a naive/aware mismatch would silently change behaviour."""
     token, _ = signup(client, unique_email("early"))
-    start = _now() + timedelta(hours=4)
+    start = utcnow() + timedelta(hours=4)
     m = create_scheduled(client, token, start_time=start)
 
     r = client.post(
@@ -251,7 +252,7 @@ def test_scheduled_meeting_rejects_an_early_guest(client):
 def test_scheduled_meeting_admits_a_guest_once_it_has_started(client):
     """The mirror of the 425 test - proves the gate is not simply always on."""
     token, _ = signup(client, unique_email("ontime"))
-    start = _now() - timedelta(minutes=30)
+    start = utcnow() - timedelta(minutes=30)
     m = create_scheduled(client, token, start_time=start)
 
     r = client.post(
@@ -346,7 +347,7 @@ def test_only_the_host_can_mutate_a_meeting(client):
 
 def test_update_and_delete_a_scheduled_meeting(client):
     token, _ = signup(client, unique_email("editor"))
-    m = create_scheduled(client, token, start_time=_now() + timedelta(days=1))
+    m = create_scheduled(client, token, start_time=utcnow() + timedelta(days=1))
     n = m["meeting_number"]
 
     r = client.patch(
@@ -354,7 +355,7 @@ def test_update_and_delete_a_scheduled_meeting(client):
         json={
             "topic": "Renamed",
             "description": "New description",
-            "start_time": _iso(_now() + timedelta(days=2)),
+            "start_time": _iso(utcnow() + timedelta(days=2)),
             "duration": 60,
         },
         headers=auth_header(token),

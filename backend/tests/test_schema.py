@@ -14,17 +14,17 @@ from conftest import ENGINE, IS_POSTGRES
 # timezone-aware UTC timestamps
 # --------------------------------------------------------------------------
 
-def test_now_helper_returns_timezone_aware_utc():
-    """models._now() is the default for every timestamp column in the schema.
+def test_utcnow_helper_returns_timezone_aware_utc():
+    """models.utcnow() is the default for every timestamp column in the schema.
     Naive local time in a database that outlives one machine is a bug waiting
     for a deploy in a different timezone."""
     from datetime import timezone
 
-    from app.models import _now
+    from app.models import utcnow
 
-    value = _now()
-    assert value.tzinfo is not None, "_now() must be timezone-aware"
-    assert value.utcoffset() == timezone.utc.utcoffset(None), "_now() must be UTC"
+    value = utcnow()
+    assert value.tzinfo is not None, "utcnow() must be timezone-aware"
+    assert value.utcoffset() == timezone.utc.utcoffset(None), "utcnow() must be UTC"
 
 
 def test_timestamp_columns_declare_timezone():

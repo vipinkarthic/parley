@@ -110,10 +110,13 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  changePassword: (current_password: string, new_password: string) =>
+  changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: boolean }>("/auth/change-password", {
       method: "POST",
-      body: JSON.stringify({ current_password, new_password }),
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
     }),
   startPersonalRoom: () =>
     request<Meeting>("/api/meetings/personal", { method: "POST" }),
@@ -194,11 +197,11 @@ export const api = {
 // getRandomValues, then to a timestamp, because a slightly weaker key still
 // deduplicates a retry and a crash here would block joining entirely.
 export function newJoinKey(): string {
-  const c = globalThis.crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
-  if (typeof c?.getRandomValues === "function") {
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+  if (typeof webCrypto?.getRandomValues === "function") {
     const bytes = new Uint8Array(16);
-    c.getRandomValues(bytes);
+    webCrypto.getRandomValues(bytes);
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

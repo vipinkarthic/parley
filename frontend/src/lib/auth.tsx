@@ -69,16 +69,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
-  const completeAuth = useCallback((token: string, u: User) => {
+  const completeAuth = useCallback((token: string, nextUser: User) => {
     setToken(token);
-    setUser(u);
+    setUser(nextUser);
     setLoading(false);
   }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const { token, user: u } = await api.login(email, password);
-      completeAuth(token, u);
+      const { token, user: nextUser } = await api.login(email, password);
+      completeAuth(token, nextUser);
     },
     [completeAuth]
   );

@@ -106,7 +106,7 @@ def test_expired_otp_is_rejected(client, db):
     timestamps are naive local time or timezone-aware UTC.
     """
     from app import models
-    from app.models import _now
+    from app.models import utcnow
 
     email = unique_email("expired")
     r = client.post(
@@ -120,7 +120,7 @@ def test_expired_otp_is_rejected(client, db):
         .filter(models.PendingSignup.email == email)
         .one()
     )
-    pending.expires_at = _now() - timedelta(minutes=1)
+    pending.expires_at = utcnow() - timedelta(minutes=1)
     db.commit()
 
     r = client.post("/auth/signup/verify", json={"email": email, "code": code})
@@ -137,7 +137,7 @@ def test_unexpired_otp_is_accepted(client, db):
     still pass the test above.
     """
     from app import models
-    from app.models import _now
+    from app.models import utcnow
 
     email = unique_email("fresh")
     r = client.post(
@@ -151,7 +151,7 @@ def test_unexpired_otp_is_accepted(client, db):
         .filter(models.PendingSignup.email == email)
         .one()
     )
-    pending.expires_at = _now() + timedelta(minutes=9)
+    pending.expires_at = utcnow() + timedelta(minutes=9)
     db.commit()
 
     r = client.post("/auth/signup/verify", json={"email": email, "code": code})

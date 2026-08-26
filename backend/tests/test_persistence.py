@@ -59,14 +59,14 @@ def test_created_at_is_close_to_the_app_clock(client, db):
     which is the failure mode that broke nothing visibly and everything
     subtly."""
     from app import models
-    from app.models import _now
+    from app.models import utcnow
 
     token, _ = signup(client, unique_email("clock"))
-    before = _now()
+    before = utcnow()
     r = client.post(
         "/api/meetings/instant", json={"topic": "Clocked"}, headers=auth_header(token)
     )
-    after = _now()
+    after = utcnow()
 
     db.expire_all()
     row = db.get(models.Meeting, r.json()["id"])
@@ -85,10 +85,10 @@ def test_created_at_is_close_to_the_app_clock(client, db):
 def test_ordering_by_start_time_is_correct(client):
     """list_upcoming orders by start_time ascending; if timestamps are stored
     inconsistently the order silently scrambles."""
-    from app.models import _now
+    from app.models import utcnow
 
     token, _ = signup(client, unique_email("ordering"))
-    base = _now()
+    base = utcnow()
     offsets = [timedelta(hours=5), timedelta(hours=1), timedelta(days=3), timedelta(hours=9)]
     created = []
     for i, off in enumerate(offsets):

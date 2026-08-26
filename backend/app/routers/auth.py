@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import config, crud, models, ratelimit, schemas
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import _now
+from ..models import utcnow
 from ..emailer import EmailSendError, send_otp_email
 from ..security import (
     create_access_token,
@@ -94,7 +94,7 @@ def request_signup_otp(
         name=data.name,
         password_hash=hash_password(data.password),
         code_hash=hash_code(code),
-        expires_at=_now() + timedelta(minutes=config.OTP_TTL_MINUTES),
+        expires_at=utcnow() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
     email_sent = _dispatch_otp(background, data.email, code)
     return schemas.OtpRequestResponse(
@@ -124,7 +124,7 @@ def resend_signup_otp(
         name=pending.name,
         password_hash=pending.password_hash,
         code_hash=hash_code(code),
-        expires_at=_now() + timedelta(minutes=config.OTP_TTL_MINUTES),
+        expires_at=utcnow() + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
     email_sent = _dispatch_otp(background, data.email, code)
     return schemas.OtpRequestResponse(
@@ -153,7 +153,7 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No pending signup found. Please start again.",
         )
-    if _now() > pending.expires_at:
+    if utcnow() > pending.expires_at:
         crud.delete_pending_signup(db, pending)
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
@@ -205,8 +205,8 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=schemas.UserOut)
-def me(current=Depends(get_current_user)):
-    return current
+def me(user: models.User = Depends(get_current_user)):
+    return user
 
 
 @router.post("/change-password")

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import models, utils
 from .config import SEED_SAMPLE_DATA
-from .models import _now
+from .models import utcnow
 from .security import hash_password
 
 # Ready-to-use demo logins so the app can be tested without going through the
@@ -29,19 +29,19 @@ def seed_demo_accounts(db: Session) -> None:
     They are created verified, so they can log in without going through the
     email OTP flow.
     """
-    for acc in DEMO_ACCOUNTS:
+    for account in DEMO_ACCOUNTS:
         exists = (
-            db.query(models.User).filter(models.User.email == acc["email"]).first()
+            db.query(models.User).filter(models.User.email == account["email"]).first()
         )
         if exists:
             continue
         db.add(
             models.User(
-                name=acc["name"],
-                email=acc["email"],
+                name=account["name"],
+                email=account["email"],
                 password_hash=hash_password(DEMO_PASSWORD),
                 is_verified=True,
-                avatar_color=acc["color"],
+                avatar_color=account["color"],
                 pmi=utils.generate_meeting_number(db),
             )
         )
@@ -49,15 +49,15 @@ def seed_demo_accounts(db: Session) -> None:
 
 
 def _make_meeting(db: Session, **kwargs) -> models.Meeting:
-    m = models.Meeting(
+    meeting = models.Meeting(
         id=uuid.uuid4().hex,
         meeting_number=utils.generate_meeting_number(db),
         passcode=utils.generate_passcode(),
         **kwargs,
     )
-    db.add(m)
+    db.add(meeting)
     db.flush()
-    return m
+    return meeting
 
 
 def seed_database(db: Session) -> None:
@@ -74,7 +74,7 @@ def seed_database(db: Session) -> None:
     if user is None:
         return
 
-    now = _now()
+    now = utcnow()
 
     upcoming = [
         {

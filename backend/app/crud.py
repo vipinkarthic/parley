@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from . import models, schemas, utils
-from .models import _now
+from .models import utcnow
 
 
 _AVATAR_COLORS = [
@@ -81,7 +81,7 @@ def get_or_create_personal_meeting(
             host_id=user.id,
             meeting_type="instant",
             status="active",
-            start_time=_now(),
+            start_time=utcnow(),
             duration=60,
         )
         db.add(meeting)
@@ -117,17 +117,17 @@ def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
         .distinct()
         .all()
     )
-    busy = {r[0] for r in busy_rows}
+    busy = {row[0] for row in busy_rows}
     return [
         {
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "avatar_color": u.avatar_color,
-            "avatar_url": u.avatar_url,
-            "status": "in-meeting" if u.id in busy else "available",
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "avatar_color": user.avatar_color,
+            "avatar_url": user.avatar_url,
+            "status": "in-meeting" if user.id in busy else "available",
         }
-        for u in users
+        for user in users
     ]
 
 
@@ -229,7 +229,7 @@ def create_instant_meeting(
         host_id=host.id,
         meeting_type="instant",
         status="active",
-        start_time=_now(),
+        start_time=utcnow(),
         duration=60,
         **_settings_kwargs(data.settings),
     )
@@ -412,7 +412,7 @@ def active_meeting_for_user(
     already somewhere else?". This is what enforces one active meeting per
     account.
     """
-    q = (
+    query = (
         db.query(models.Meeting)
         .join(models.Participant, models.Participant.meeting_id == models.Meeting.id)
         .filter(
@@ -422,8 +422,8 @@ def active_meeting_for_user(
         )
     )
     if exclude_meeting_id:
-        q = q.filter(models.Meeting.id != exclude_meeting_id)
-    return q.first()
+        query = query.filter(models.Meeting.id != exclude_meeting_id)
+    return query.first()
 
 
 def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> None:
@@ -441,8 +441,8 @@ def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> No
         )
         .all()
     )
-    for r in rows:
-        r.is_active = False
+    for row in rows:
+        row.is_active = False
     if rows:
         db.commit()
 
@@ -498,7 +498,7 @@ def get_participant_by_token(
 
 
 def deactivate_participant(db: Session, meeting_id: str, participant_id: int) -> None:
-    p = (
+    participant = (
         db.query(models.Participant)
         .filter(
             models.Participant.id == participant_id,
@@ -506,8 +506,8 @@ def deactivate_participant(db: Session, meeting_id: str, participant_id: int) ->
         )
         .first()
     )
-    if p and p.is_active:
-        p.is_active = False
+    if participant and participant.is_active:
+        participant.is_active = False
         db.commit()
 
 
@@ -547,9 +547,9 @@ def set_participant_muted(
 
 def mute_all_except_host(db: Session, meeting: models.Meeting) -> int:
     count = 0
-    for p in list_participants(db, meeting):
-        if not p.is_host and not p.is_muted:
-            p.is_muted = True
+    for participant in list_participants(db, meeting):
+        if not participant.is_host and not participant.is_muted:
+            participant.is_muted = True
             count += 1
     db.commit()
     return count
