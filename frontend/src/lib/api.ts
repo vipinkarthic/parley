@@ -5,7 +5,7 @@ import type {
   MeetingSettings,
   Preferences,
   User,
-} from "./types";
+} from "@/lib/types";
 
 const BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchIceConfig, type IceConfig } from "./api";
-import type { MeetingSettings } from "./types";
+import { fetchIceConfig, type IceConfig } from "@/lib/api";
+import type { MeetingSettings } from "@/lib/types";
 
 export interface RemotePeer {
   id: number;

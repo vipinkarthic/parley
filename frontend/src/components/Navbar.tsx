@@ -4,10 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { Avatar } from "./Avatar";
-import { ParleyLogo } from "./ParleyLogo";
-import { ChevronDownIcon, SearchIcon, SettingsIcon } from "./Icons";
-import { SoonBadge } from "./SoonBadge";
+import { Avatar } from "@/components/Avatar";
+import { ParleyLogo } from "@/components/ParleyLogo";
+import { ChevronDownIcon, SearchIcon, SettingsIcon } from "@/components/Icons";
+import { SoonBadge } from "@/components/SoonBadge";
 
 const NAV_LINKS = [
   { label: "Home", href: "/", soon: false },

@@ -7,9 +7,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import config, crud, models, ratelimit, schemas
-from ..models import _now
 from ..database import get_db
 from ..deps import get_current_user
+from ..models import _now
 from ..emailer import EmailSendError, send_otp_email
 from ..security import (
     create_access_token,

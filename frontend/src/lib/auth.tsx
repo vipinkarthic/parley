@@ -14,8 +14,8 @@ import {
   getToken,
   setToken,
   setUnauthorizedHandler,
-} from "./api";
-import type { User } from "./types";
+} from "@/lib/api";
+import type { User } from "@/lib/types";
 
 interface AuthContextValue {
   user: User | null;

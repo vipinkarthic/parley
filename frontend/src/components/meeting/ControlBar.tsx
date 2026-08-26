@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { MeetingSettings } from "@/lib/types";
-import { SecurityMenu } from "./SecurityMenu";
+import { SecurityMenu } from "@/components/meeting/SecurityMenu";
 import {
   ChatIcon,
   HandIcon,

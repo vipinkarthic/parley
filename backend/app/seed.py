@@ -9,8 +9,8 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from . import models, utils
-from .models import _now
 from .config import SEED_SAMPLE_DATA
+from .models import _now
 from .security import hash_password
 
 # Ready-to-use demo logins so the app can be tested without going through the

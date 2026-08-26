@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Modal } from "./Modal";
+import { Modal } from "@/components/Modal";
 import { api, ApiError } from "@/lib/api";
 import type { Meeting } from "@/lib/types";
 import { formatMeetingNumber, formatMeetingTime } from "@/lib/utils";
-import { useToast } from "./Toast";
-import { CalendarIcon, CheckIcon, CopyIcon } from "./Icons";
+import { useToast } from "@/components/Toast";
+import { CalendarIcon, CheckIcon, CopyIcon } from "@/components/Icons";
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 

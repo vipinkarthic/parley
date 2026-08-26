@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Modal } from "./Modal";
+import { Modal } from "@/components/Modal";
 import { api, ApiError } from "@/lib/api";
 import { parseMeetingInput } from "@/lib/utils";
 
