@@ -34,8 +34,8 @@ WS_BAD_PID = 4001
 WS_UNAUTHORISED = 4003
 WS_DENIED = 4004
 WS_MEETING_ENDED = 4005
-WS_SUPERSEDED = 4009
 WS_ROOM_FULL = 4006
+WS_SUPERSEDED = 4009
 
 # RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
 # Render service, and it is not an error - the client is expected to come back.

@@ -126,15 +126,24 @@ const ENCODER_TIERS: {
   },
 ];
 
-// Close codes the client must not retry: the participant is not coming back
-// into this meeting, so retrying would be an infinite loop against a server
-// that is answering correctly. See the matching constants in ws.py.
+// The server's application close codes, named here as they are in ws.py.
+// The 4000-4999 range is reserved for the application by the WebSocket spec.
+const WS_BAD_PID = 4001; // malformed participant id
+const WS_UNAUTHORISED = 4003; // token rejected
+const WS_DENIED = 4004; // the host denied this guest
+const WS_MEETING_ENDED = 4005; // the meeting has ended
+const WS_ROOM_FULL = 4006; // the room is full
+
+// Terminal for this participant: they are not coming back into this meeting,
+// so retrying would be an infinite loop against a server that is answering
+// correctly. 4009 is deliberately absent - "this socket was replaced" means
+// the newer socket carries on, and this one simply stops.
 const TERMINAL_CLOSE_CODES = new Set([
-  4001, // malformed participant id
-  4003, // token rejected
-  4004, // the host denied this guest
-  4005, // the meeting has ended
-  4006, // the room is full
+  WS_BAD_PID,
+  WS_UNAUTHORISED,
+  WS_DENIED,
+  WS_MEETING_ENDED,
+  WS_ROOM_FULL,
 ]);
 
 export interface UseMeetingOptions {
