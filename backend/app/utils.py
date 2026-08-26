@@ -33,13 +33,6 @@ def generate_passcode(length: int = 6) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def format_meeting_number(number: str) -> str:
-    """Format 11 digits as 'XXX XXXX XXXX' for display."""
-    if len(number) == 11:
-        return f"{number[:3]} {number[3:7]} {number[7:]}"
-    return number
-
-
 def build_invite_link(meeting_number: str, passcode: str | None = None) -> str:
     """Build an invite link, optionally carrying the passcode.
 

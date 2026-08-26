@@ -538,30 +538,6 @@ def get_participant(
     )
 
 
-def set_participant_muted(
-    db: Session, participant: models.Participant, muted: bool
-) -> models.Participant:
-    participant.is_muted = muted
-    db.commit()
-    db.refresh(participant)
-    return participant
-
-
-def mute_all_except_host(db: Session, meeting: models.Meeting) -> int:
-    count = 0
-    for participant in list_participants(db, meeting):
-        if not participant.is_host and not participant.is_muted:
-            participant.is_muted = True
-            count += 1
-    db.commit()
-    return count
-
-
-def remove_participant(db: Session, participant: models.Participant) -> None:
-    participant.is_active = False
-    db.commit()
-
-
 def active_participant_count(db: Session, meeting: models.Meeting) -> int:
     return (
         db.query(models.Participant)
