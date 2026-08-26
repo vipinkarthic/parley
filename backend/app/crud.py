@@ -182,7 +182,13 @@ def delete_pending_signup(db: Session, pending: models.PendingSignup) -> None:
     db.commit()
 
 
-def _new_meeting(db: Session, **kwargs) -> models.Meeting:
+def new_meeting(db: Session, *, commit: bool = True, **kwargs) -> models.Meeting:
+    """Build a meeting with a fresh id, number and passcode.
+
+    ``commit=False`` flushes instead, for a caller writing several meetings in
+    one transaction - which is what the seeder does. seed.py used to carry its
+    own near-identical copy of this, differing only in that one line.
+    """
     meeting = models.Meeting(
         id=uuid.uuid4().hex,
         meeting_number=utils.generate_meeting_number(db),
@@ -190,8 +196,11 @@ def _new_meeting(db: Session, **kwargs) -> models.Meeting:
         **kwargs,
     )
     db.add(meeting)
-    db.commit()
-    db.refresh(meeting)
+    if commit:
+        db.commit()
+        db.refresh(meeting)
+    else:
+        db.flush()
     return meeting
 
 
@@ -222,7 +231,7 @@ def create_instant_meeting(
     existing = get_active_instant_meeting(db, host.id)
     if existing is not None:
         return existing
-    return _new_meeting(
+    return new_meeting(
         db,
         topic=data.topic or f"{host.name}'s Instant Meeting",
         description=data.description,
@@ -238,7 +247,7 @@ def create_instant_meeting(
 def create_scheduled_meeting(
     db: Session, data: schemas.ScheduledMeetingCreate, host: models.User
 ) -> models.Meeting:
-    return _new_meeting(
+    return new_meeting(
         db,
         topic=data.topic,
         description=data.description,

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchIceConfig, type IceConfig } from "@/lib/api";
-import type { MeetingSettings } from "@/lib/types";
+import { STUN_ONLY, fetchIceConfig, type IceConfig } from "@/lib/api";
+import type { MeetingSettings, WaitingPerson } from "@/lib/types";
+import { to12Hour } from "@/lib/utils";
 
 export interface RemotePeer {
   id: number;
@@ -31,11 +32,6 @@ export interface FloatingReaction {
   emoji: string;
 }
 
-export interface WaitingPerson {
-  id: number;
-  displayName: string;
-}
-
 interface PeerBox {
   pc: RTCPeerConnection;
   streams: Map<string, MediaStream>;
@@ -45,15 +41,6 @@ interface PeerBox {
   // swapping the track on it, never by touching the transceiver.
   cameraSender: RTCRtpSender | null;
 }
-
-// Used only until GET /api/ice answers. STUN alone cannot relay media, so a
-// peer behind symmetric NAT or a corporate firewall has no path at all with
-// this list - which is why the real one is fetched rather than compiled in.
-const ICE_FALLBACK: IceConfig = {
-  iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  ],
-};
 
 const DEFAULT_SETTINGS: MeetingSettings = {
   waiting_room: true,
@@ -73,15 +60,6 @@ function wsBase(): string {
     process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||
     "http://localhost:8000";
   return base.replace(/^http/, "ws");
-}
-
-function nowTime(): string {
-  const d = new Date();
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
 }
 
 let seq = 1;
@@ -226,7 +204,7 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Map<number, PeerBox>>(new Map());
-  const iceConfigRef = useRef<IceConfig>(ICE_FALLBACK);
+  const iceConfigRef = useRef<IceConfig>(STUN_ONLY);
   const startedRef = useRef(false);
   const stateRef = useRef({ muted: !initialMicOn, videoOn: initialCamOn });
   const localStreamRef = useRef<MediaStream | null>(localStream);
@@ -582,7 +560,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       if (!trimmed) return;
       setMessages((m) => [
         ...m,
-        { id: seq++, from: "me", sender: myNameRef.current, text: trimmed, self: true, time: nowTime() },
+        { id: seq++, from: "me", sender: myNameRef.current, text: trimmed, self: true, time: to12Hour(new Date()) },
       ]);
       send({ type: "chat", text: trimmed });
     },
@@ -878,7 +856,7 @@ export function useMeeting(opts: UseMeetingOptions) {
         case "chat":
           setMessages((m) => [
             ...m,
-            { id: seq++, from: msg.from, sender: msg.displayName, text: msg.text, self: false, time: nowTime() },
+            { id: seq++, from: msg.from, sender: msg.displayName, text: msg.text, self: false, time: to12Hour(new Date()) },
           ]);
           break;
         case "reaction":

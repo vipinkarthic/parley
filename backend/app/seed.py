@@ -3,12 +3,11 @@
 Idempotent: demo accounts are created only if missing, and sample meetings are
 seeded once, so restarting the server never duplicates anything.
 """
-import uuid
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from . import models, utils
+from . import crud, models, utils
 from .config import SEED_SAMPLE_DATA
 from .models import utcnow
 from .security import hash_password
@@ -46,18 +45,6 @@ def seed_demo_accounts(db: Session) -> None:
             )
         )
     db.commit()
-
-
-def _make_meeting(db: Session, **kwargs) -> models.Meeting:
-    meeting = models.Meeting(
-        id=uuid.uuid4().hex,
-        meeting_number=utils.generate_meeting_number(db),
-        passcode=utils.generate_passcode(),
-        **kwargs,
-    )
-    db.add(meeting)
-    db.flush()
-    return meeting
 
 
 def seed_database(db: Session) -> None:
@@ -103,8 +90,9 @@ def seed_database(db: Session) -> None:
         },
     ]
     for data in upcoming:
-        _make_meeting(
+        crud.new_meeting(
             db,
+            commit=False,
             host_id=user.id,
             meeting_type="scheduled",
             status="scheduled",
@@ -129,8 +117,9 @@ def seed_database(db: Session) -> None:
         },
     ]
     for data in recent:
-        _make_meeting(
+        crud.new_meeting(
             db,
+            commit=False,
             host_id=user.id,
             meeting_type="scheduled",
             status="ended",
