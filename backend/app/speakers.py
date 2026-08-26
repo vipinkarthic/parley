@@ -96,7 +96,7 @@ class RoomSpeakers:
     _last_broadcast_ms: float = float("-inf")
     _last_sent: tuple[tuple[int, ...], tuple[int, ...]] | None = None
 
-    # -- membership ---------------------------------------------------------
+    # --- Membership -------------------------------------------------------
 
     def add(self, pid: int, now_ms: float) -> None:
         if pid not in self.reports:
@@ -111,7 +111,7 @@ class RoomSpeakers:
     def __bool__(self) -> bool:
         return bool(self.reports)
 
-    # -- input --------------------------------------------------------------
+    # --- Input ------------------------------------------------------------
 
     def report(self, pid: int, on: bool, level: int, now_ms: float) -> None:
         """Record one client's report about its own microphone."""
@@ -128,7 +128,7 @@ class RoomSpeakers:
             # an "off", which is exactly the message most likely to be lost.
             entry.speaking = False
 
-    # -- output -------------------------------------------------------------
+    # --- Output -----------------------------------------------------------
 
     def _prune(self, now_ms: float) -> None:
         stale = [
@@ -194,7 +194,7 @@ class RoomSpeakers:
             "speaking": self.speaking_now(now_ms),
         }
 
-    # -- broadcast gating ---------------------------------------------------
+    # --- Broadcast gating -------------------------------------------------
 
     def due(self, now_ms: float, video_budget: int, limit: int = RANK_LIMIT):
         """Return a message to broadcast, or None.

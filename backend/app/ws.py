@@ -173,10 +173,18 @@ class Hub:
         return entry is not None and entry["ws"] is ws
 
     def peers(self, number: str, exclude: int) -> list[dict]:
-        return [p["info"] for pid, p in self.rooms.get(number, {}).items() if pid != exclude]
+        return [
+            peer["info"]
+            for pid, peer in self.rooms.get(number, {}).items()
+            if pid != exclude
+        ]
 
     def host_pids(self, number: str) -> list[int]:
-        return [pid for pid, p in self.rooms.get(number, {}).items() if p["info"].get("isHost")]
+        return [
+            pid
+            for pid, peer in self.rooms.get(number, {}).items()
+            if peer["info"].get("isHost")
+        ]
 
     def add_lobby(self, number: str, pid: int, ws: WebSocket, info: dict) -> None:
         self.lobbies.setdefault(number, {})[pid] = {"ws": ws, "info": info}
@@ -220,7 +228,9 @@ class Hub:
         if peer:
             await self.send(peer["ws"], message)
 
-    async def broadcast(self, number: str, message: dict, exclude: int | None = None) -> None:
+    async def broadcast(
+        self, number: str, message: dict, exclude: int | None = None
+    ) -> None:
         """Fan a message out to the room, concurrently.
 
         Awaiting each send in turn makes the slowest receiver everyone else's
@@ -618,7 +628,10 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 await hub.send(websocket, {"type": "pong"})
                 continue
 
-            # ignore anything from people still in the lobby - checked live so a just-admitted guest relays right away
+            # Ignore anything from someone still in the lobby. Checked
+            # against live membership rather than the admission read at
+            # connect time, so a guest admitted mid-connection starts
+            # relaying immediately instead of on their next reconnect.
             if pid not in hub.rooms.get(number, {}):
                 continue
 
@@ -664,7 +677,12 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 info["videoOn"] = bool(data.get("videoOn", info["videoOn"]))
                 await hub.broadcast(
                     number,
-                    {"type": "state", "from": pid, "muted": info["muted"], "videoOn": info["videoOn"]},
+                    {
+                        "type": "state",
+                        "from": pid,
+                        "muted": info["muted"],
+                        "videoOn": info["videoOn"],
+                    },
                     exclude=pid,
                 )
             elif mtype == "chat":
@@ -672,7 +690,12 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     continue
                 await hub.broadcast(
                     number,
-                    {"type": "chat", "from": pid, "displayName": info["displayName"], "text": str(data.get("text", ""))[:2000]},
+                    {
+                        "type": "chat",
+                        "from": pid,
+                        "displayName": info["displayName"],
+                        "text": str(data.get("text", ""))[:2000],
+                    },
                     exclude=pid,
                 )
             elif mtype == "reaction":
@@ -680,25 +703,37 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     continue
                 await hub.broadcast(
                     number,
-                    {"type": "reaction", "from": pid, "emoji": str(data.get("emoji", ""))[:8]},
+                    {
+                        "type": "reaction",
+                        "from": pid,
+                        "emoji": str(data.get("emoji", ""))[:8],
+                    },
                     exclude=pid,
                 )
             elif mtype == "hand":
                 info["hand"] = bool(data.get("raised"))
                 await hub.broadcast(
-                    number, {"type": "hand", "from": pid, "raised": info["hand"]}, exclude=pid
+                    number,
+                    {"type": "hand", "from": pid, "raised": info["hand"]},
+                    exclude=pid,
                 )
             elif mtype == "share":
                 if not info["isHost"] and not hub.setting(number, "allow_screen_share"):
                     await hub.send(websocket, {"type": "share-denied"})
                     continue
                 on = bool(data.get("on"))
-                # stash it on the peer so late joiners know about the screen share
+                # Kept on the peer's info so a late joiner is told about a
+                # screenshare that started before they arrived.
                 info["sharing"] = on
                 info["screenSid"] = data.get("streamId") if on else None
                 await hub.broadcast(
                     number,
-                    {"type": "share", "from": pid, "on": on, "streamId": info["screenSid"]},
+                    {
+                        "type": "share",
+                        "from": pid,
+                        "on": on,
+                        "streamId": info["screenSid"],
+                    },
                     exclude=pid,
                 )
             elif mtype == "rename":
@@ -724,7 +759,9 @@ async def meeting_socket(websocket: WebSocket, number: str):
             elif mtype == "remove-peer" and info["isHost"] and "target" in data:
                 target = int(data["target"])
                 await hub.send_to(number, target, {"type": "removed"})
-                await hub.broadcast(number, {"type": "peer-left", "id": target}, exclude=target)
+                await hub.broadcast(
+                    number, {"type": "peer-left", "id": target}, exclude=target
+                )
                 await _deactivate(meeting_id, target)
             elif mtype == "end-meeting" and info["isHost"]:
                 # Persisted first: `status == "ended"` is what stops a
@@ -753,10 +790,17 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     await _admit(number, meeting_id, *_lobby_pids(number))
                 await _set_waiting_room(meeting_id, on)
             elif mtype == "settings" and info["isHost"]:
-                patch = {k: bool(v) for k, v in (data.get("settings") or {}).items() if k in SETTING_KEYS}
+                patch = {
+                    k: bool(v)
+                    for k, v in (data.get("settings") or {}).items()
+                    if k in SETTING_KEYS
+                }
                 if patch:
                     hub.settings.setdefault(number, {}).update(patch)
-                    await hub.broadcast(number, {"type": "settings", "settings": hub.settings[number]})
+                    await hub.broadcast(
+                        number,
+                        {"type": "settings", "settings": hub.settings[number]},
+                    )
                     if patch.get("waiting_room") is False:
                         await _admit(number, meeting_id, *_lobby_pids(number))
                     await _update_settings(meeting_id, patch)

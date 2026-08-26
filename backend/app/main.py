@@ -98,7 +98,10 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     installed = _install_sigterm_handler()
-    logger.info("Parley API ready (database: %s)", engine.url.render_as_string(hide_password=True))
+    logger.info(
+        "Parley API ready (database: %s)",
+        engine.url.render_as_string(hide_password=True),
+    )
     yield
     # Catch-all for a shutdown that did not come through SIGTERM - Ctrl-C, or
     # a reload. Harmless if the handler already ran.

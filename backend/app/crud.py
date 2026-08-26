@@ -217,7 +217,8 @@ def _settings_kwargs(settings: "schemas.MeetingSettingsUpdate | None") -> dict:
 def create_instant_meeting(
     db: Session, data: schemas.InstantMeetingCreate, host: models.User
 ) -> models.Meeting:
-    # reuse the host's existing instant room instead of spawning a new one each time they click New Meeting
+    # Reuse the host's existing instant room rather than minting a new one
+    # every time they click New Meeting, which would strand the first.
     existing = get_active_instant_meeting(db, host.id)
     if existing is not None:
         return existing
@@ -376,7 +377,9 @@ _SETTINGS_FIELDS = {
 }
 
 
-def update_settings(db: Session, meeting: models.Meeting, patch: dict) -> models.Meeting:
+def update_settings(
+    db: Session, meeting: models.Meeting, patch: dict
+) -> models.Meeting:
     for key, value in patch.items():
         if key in _SETTINGS_FIELDS and value is not None:
             setattr(meeting, key, value)

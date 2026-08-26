@@ -95,7 +95,9 @@ export function PreJoin({
     });
   };
 
-  // don't let them join until the camera/mic are actually ready, or we'd go in with a null stream
+  // Hold the join until the camera and microphone have actually resolved.
+  // Joining earlier takes a null stream into the room, and nothing after
+  // that point goes back to look for one.
   const deviceReady = stream !== null || denied;
   const canJoin =
     deviceReady &&

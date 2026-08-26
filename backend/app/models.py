@@ -143,7 +143,9 @@ class Participant(Base):
     is_video_on: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     admission: Mapped[str] = mapped_column(String(12), default="admitted")
-    # secret the client sends back on the socket - peers only see the numeric id so nobody can fake being the host
+    # The secret the client hands back when it opens the signalling socket.
+    # Peers only ever see the numeric id, so possession of this is what
+    # separates the real participant from anyone claiming to be them.
     ws_token: Mapped[str] = mapped_column(String(40), default="")
     # Idempotency key for POST /join. A join whose response is lost in flight
     # (flaky mobile network, a proxy timing out during a cold start) used to

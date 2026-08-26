@@ -57,7 +57,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (body?.detail) detail = body.detail;
     } catch {
     }
-    // stale token -> clear it and bounce to /login (auth routes handle their own 401s)
+    // A stale token: clear it and bounce to /login. Auth routes are exempt
+    // because a 401 there is the answer, not a session that expired.
     if (res.status === 401 && !path.startsWith("/auth/")) {
       clearToken();
       onUnauthorized?.();

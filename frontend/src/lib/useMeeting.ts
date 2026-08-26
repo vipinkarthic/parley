@@ -257,7 +257,8 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   useEffect(() => {
     localStreamRef.current = localStream;
-    // keep the real tracks matching the mic/cam state, else the UI says muted while audio is still live
+    // Keep the real tracks in step with the mic/cam state. Without this the
+    // UI can say muted while the track is still live and still sending.
     if (localStream) {
       localStream.getAudioTracks().forEach((t) => (t.enabled = !stateRef.current.muted));
       localStream.getVideoTracks().forEach((t) => (t.enabled = stateRef.current.videoOn));

@@ -26,7 +26,9 @@ def meeting_out(
         duration=meeting.duration,
         created_at=meeting.created_at,
         host=schemas.UserOut.model_validate(meeting.host),
-        # only the host gets the passcode in the link, else any guest hitting this endpoint could just read it out
+        # Only the host gets the passcode in the link. Anyone can reach this
+        # endpoint with a meeting number, so embedding it unconditionally
+        # would hand the passcode to exactly the people it gates.
         invite_link=utils.build_invite_link(
             meeting.meeting_number, meeting.passcode if is_host_viewer else None
         ),
