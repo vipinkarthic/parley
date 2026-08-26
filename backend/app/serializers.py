@@ -7,8 +7,11 @@ from . import crud, models, schemas, utils
 def meeting_out(
     db: Session, meeting: models.Meeting, viewer_id: int | None = None
 ) -> schemas.MeetingOut:
-    """Serialize a meeting. The passcode is only revealed to the host (the
-    meeting's owner), so it isn't leaked to anyone who knows the number."""
+    """Serialize a meeting for the API.
+
+    The passcode is only revealed to the host, so knowing a meeting number is
+    not enough to learn the passcode that goes with it.
+    """
     is_host_viewer = viewer_id is not None and viewer_id == meeting.host_id
     return schemas.MeetingOut(
         id=meeting.id,

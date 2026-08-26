@@ -95,8 +95,11 @@ def get_or_create_personal_meeting(
 
 
 def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
-    """All other registered users, with live presence derived from whether they
-    currently have an active participant in a non-ended meeting."""
+    """All other registered users, with their live presence.
+
+    Presence is derived from whether the user currently has an active
+    participant row in a meeting that has not ended.
+    """
     users = (
         db.query(models.User)
         .filter(models.User.id != exclude_user_id)
@@ -400,8 +403,12 @@ def host_present(db: Session, meeting: models.Meeting) -> bool:
 def active_meeting_for_user(
     db: Session, user_id: int, exclude_meeting_id: str | None = None
 ) -> models.Meeting | None:
-    """The non-ended meeting a user is currently active in (excluding one), if
-    any. Enforces 'one active meeting per account'."""
+    """The non-ended meeting a user is currently active in, if any.
+
+    One meeting may be excluded, which is what lets a join ask "are they
+    already somewhere else?". This is what enforces one active meeting per
+    account.
+    """
     q = (
         db.query(models.Meeting)
         .join(models.Participant, models.Participant.meeting_id == models.Meeting.id)
@@ -417,8 +424,11 @@ def active_meeting_for_user(
 
 
 def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> None:
-    """Drop any prior active sessions this user has in this meeting (handles a
-    page refresh / rejoin cleanly)."""
+    """Drop any prior active sessions this user has in this meeting.
+
+    A page refresh or a rejoin would otherwise leave the previous session
+    behind as a second active row.
+    """
     rows = (
         db.query(models.Participant)
         .filter(

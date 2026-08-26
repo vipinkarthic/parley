@@ -41,8 +41,11 @@ def format_meeting_number(number: str) -> str:
 
 
 def build_invite_link(meeting_number: str, passcode: str | None = None) -> str:
-    """Invite link with the passcode embedded in the query string, so link
-    recipients don't have to type it while ID-only joiners still must."""
+    """Build an invite link, optionally carrying the passcode.
+
+    The passcode rides in the query string so link recipients do not have to
+    type it, while someone joining by meeting ID alone still must.
+    """
     link = f"{FRONTEND_URL}/j/{meeting_number}"
     if passcode:
         link += f"?pwd={passcode}"

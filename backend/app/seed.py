@@ -24,8 +24,11 @@ DEMO_ACCOUNTS = [
 
 
 def seed_demo_accounts(db: Session) -> None:
-    """Create the demo accounts if they don't already exist (verified, so they
-    can log in straight away)."""
+    """Create the demo accounts, if they do not already exist.
+
+    They are created verified, so they can log in without going through the
+    email OTP flow.
+    """
     for acc in DEMO_ACCOUNTS:
         exists = (
             db.query(models.User).filter(models.User.email == acc["email"]).first()

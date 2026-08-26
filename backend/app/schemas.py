@@ -77,6 +77,7 @@ class LoginRequest(BaseModel):
 
 class AuthResponse(BaseModel):
     """Returned on successful login / signup verification."""
+
     token: str
     user: UserOut
 
@@ -105,8 +106,12 @@ class ParticipantJoin(BaseModel):
 
 
 class ParticipantJoinOut(ParticipantOut):
-    """Join response - includes the private WebSocket token (not exposed in
-    the general participants list)."""
+    """Join response.
+
+    Carries the private WebSocket token, which is deliberately absent from
+    the general participants list.
+    """
+
     ws_token: str
     is_meeting_host: bool
     admission: str
@@ -121,6 +126,7 @@ class ScheduledMeetingUpdate(BaseModel):
 
 class MeetingSettings(BaseModel):
     """Host-controlled per-meeting settings (host always bypasses the allow_*)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     waiting_room: bool

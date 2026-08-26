@@ -183,9 +183,12 @@ app.include_router(ws_router)
 
 @app.get("/", tags=["health"])
 def health():
-    """The original health route. Kept as-is: Render's deployed service has
-    its health check pointed here, and changing it would need a dashboard
-    change to land at the same moment as the code."""
+    """The original health route.
+
+    Kept as-is: Render's deployed service has its health check pointed here,
+    and changing it would need a dashboard change to land at the same moment
+    as the code.
+    """
     return {"status": "ok", "service": "parley-api"}
 
 
