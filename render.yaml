@@ -11,16 +11,16 @@
 #
 # The public hostname is NOT derived from `name`. It comes from the service's
 # `slug`, which is fixed when the service is created and never follows a
-# rename - here the slug is `zoom-clone-api-in8u`, left over from the original
-# project name, so the service answers on
-# https://zoom-clone-api-in8u.onrender.com no matter what it is called.
+# rename, so this service still answers on the .onrender.com hostname it was
+# given on day one regardless of what it is called now.
 #
-# The only way to a tidier .onrender.com URL is a brand new service, which
-# means new env vars, a new DATABASE_URL, and the duplicate accident again.
-# It is not worth it, and it is not needed: the service is fronted by
-# https://parleyapi.vipinkarthic.com, which is the name to use everywhere -
-# in the frontend build, in documentation, and on a CV. Treat the
-# onrender.com hostname as an implementation detail.
+# The only way to change that hostname is a brand new service, which means new
+# env vars, a new DATABASE_URL, and the duplicate accident again. It is not
+# worth it and it is not needed: the service is fronted by
+# https://parleyapi.vipinkarthic.com, which is the canonical name and the one
+# to use everywhere - in the frontend build, in documentation, and anywhere
+# this project is linked. Treat the .onrender.com hostname as an internal
+# implementation detail and do not put it in front of anyone.
 services:
   - type: web
     name: parley-meeting

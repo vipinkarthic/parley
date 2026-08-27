@@ -22,7 +22,7 @@ set -euo pipefail
 
 BRANCH="phase4-media"
 TARGET="main"
-API="${PARLEY_API_URL:-https://zoom-clone-api-in8u.onrender.com}"
+API="${PARLEY_API_URL:-https://parleyapi.vipinkarthic.com}"
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
