@@ -43,3 +43,10 @@ backend/.pytest_cache/
 # Git worktrees created for phase branches. These are checkouts of
 # this same repository - committing them would nest the repo in itself.
 .claude/worktrees/
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
+e2e/results.json
+e2e/blob-report/
+e2e/.cache/
