@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from . import models, schemas, utils
-from .models import _now
+from .models import utcnow
 
 
 _AVATAR_COLORS = [
@@ -81,7 +81,7 @@ def get_or_create_personal_meeting(
             host_id=user.id,
             meeting_type="instant",
             status="active",
-            start_time=_now(),
+            start_time=utcnow(),
             duration=60,
         )
         db.add(meeting)
@@ -95,8 +95,11 @@ def get_or_create_personal_meeting(
 
 
 def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
-    """All other registered users, with live presence derived from whether they
-    currently have an active participant in a non-ended meeting."""
+    """All other registered users, with their live presence.
+
+    Presence is derived from whether the user currently has an active
+    participant row in a meeting that has not ended.
+    """
     users = (
         db.query(models.User)
         .filter(models.User.id != exclude_user_id)
@@ -114,17 +117,17 @@ def list_contacts(db: Session, exclude_user_id: int) -> list[dict]:
         .distinct()
         .all()
     )
-    busy = {r[0] for r in busy_rows}
+    busy = {row[0] for row in busy_rows}
     return [
         {
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "avatar_color": u.avatar_color,
-            "avatar_url": u.avatar_url,
-            "status": "in-meeting" if u.id in busy else "available",
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "avatar_color": user.avatar_color,
+            "avatar_url": user.avatar_url,
+            "status": "in-meeting" if user.id in busy else "available",
         }
-        for u in users
+        for user in users
     ]
 
 
@@ -179,7 +182,13 @@ def delete_pending_signup(db: Session, pending: models.PendingSignup) -> None:
     db.commit()
 
 
-def _new_meeting(db: Session, **kwargs) -> models.Meeting:
+def new_meeting(db: Session, *, commit: bool = True, **kwargs) -> models.Meeting:
+    """Build a meeting with a fresh id, number and passcode.
+
+    ``commit=False`` flushes instead, for a caller writing several meetings in
+    one transaction - which is what the seeder does. seed.py used to carry its
+    own near-identical copy of this, differing only in that one line.
+    """
     meeting = models.Meeting(
         id=uuid.uuid4().hex,
         meeting_number=utils.generate_meeting_number(db),
@@ -187,8 +196,11 @@ def _new_meeting(db: Session, **kwargs) -> models.Meeting:
         **kwargs,
     )
     db.add(meeting)
-    db.commit()
-    db.refresh(meeting)
+    if commit:
+        db.commit()
+        db.refresh(meeting)
+    else:
+        db.flush()
     return meeting
 
 
@@ -214,18 +226,19 @@ def _settings_kwargs(settings: "schemas.MeetingSettingsUpdate | None") -> dict:
 def create_instant_meeting(
     db: Session, data: schemas.InstantMeetingCreate, host: models.User
 ) -> models.Meeting:
-    # reuse the host's existing instant room instead of spawning a new one each time they click New Meeting
+    # Reuse the host's existing instant room rather than minting a new one
+    # every time they click New Meeting, which would strand the first.
     existing = get_active_instant_meeting(db, host.id)
     if existing is not None:
         return existing
-    return _new_meeting(
+    return new_meeting(
         db,
         topic=data.topic or f"{host.name}'s Instant Meeting",
         description=data.description,
         host_id=host.id,
         meeting_type="instant",
         status="active",
-        start_time=_now(),
+        start_time=utcnow(),
         duration=60,
         **_settings_kwargs(data.settings),
     )
@@ -234,7 +247,7 @@ def create_instant_meeting(
 def create_scheduled_meeting(
     db: Session, data: schemas.ScheduledMeetingCreate, host: models.User
 ) -> models.Meeting:
-    return _new_meeting(
+    return new_meeting(
         db,
         topic=data.topic,
         description=data.description,
@@ -366,16 +379,11 @@ def set_waiting_room(
     return meeting
 
 
-_SETTINGS_FIELDS = {
-    "waiting_room", "locked", "mute_on_entry", "join_before_host",
-    "allow_screen_share", "allow_unmute", "allow_video", "allow_rename",
-    "allow_chat", "allow_reactions",
-}
-
-
-def update_settings(db: Session, meeting: models.Meeting, patch: dict) -> models.Meeting:
+def update_settings(
+    db: Session, meeting: models.Meeting, patch: dict
+) -> models.Meeting:
     for key, value in patch.items():
-        if key in _SETTINGS_FIELDS and value is not None:
+        if key in schemas.SETTING_KEYS and value is not None:
             setattr(meeting, key, value)
     db.commit()
     db.refresh(meeting)
@@ -400,9 +408,13 @@ def host_present(db: Session, meeting: models.Meeting) -> bool:
 def active_meeting_for_user(
     db: Session, user_id: int, exclude_meeting_id: str | None = None
 ) -> models.Meeting | None:
-    """The non-ended meeting a user is currently active in (excluding one), if
-    any. Enforces 'one active meeting per account'."""
-    q = (
+    """The non-ended meeting a user is currently active in, if any.
+
+    One meeting may be excluded, which is what lets a join ask "are they
+    already somewhere else?". This is what enforces one active meeting per
+    account.
+    """
+    query = (
         db.query(models.Meeting)
         .join(models.Participant, models.Participant.meeting_id == models.Meeting.id)
         .filter(
@@ -412,13 +424,16 @@ def active_meeting_for_user(
         )
     )
     if exclude_meeting_id:
-        q = q.filter(models.Meeting.id != exclude_meeting_id)
-    return q.first()
+        query = query.filter(models.Meeting.id != exclude_meeting_id)
+    return query.first()
 
 
 def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> None:
-    """Drop any prior active sessions this user has in this meeting (handles a
-    page refresh / rejoin cleanly)."""
+    """Drop any prior active sessions this user has in this meeting.
+
+    A page refresh or a rejoin would otherwise leave the previous session
+    behind as a second active row.
+    """
     rows = (
         db.query(models.Participant)
         .filter(
@@ -428,8 +443,8 @@ def deactivate_user_in_meeting(db: Session, user_id: int, meeting_id: str) -> No
         )
         .all()
     )
-    for r in rows:
-        r.is_active = False
+    for row in rows:
+        row.is_active = False
     if rows:
         db.commit()
 
@@ -485,7 +500,7 @@ def get_participant_by_token(
 
 
 def deactivate_participant(db: Session, meeting_id: str, participant_id: int) -> None:
-    p = (
+    participant = (
         db.query(models.Participant)
         .filter(
             models.Participant.id == participant_id,
@@ -493,8 +508,8 @@ def deactivate_participant(db: Session, meeting_id: str, participant_id: int) ->
         )
         .first()
     )
-    if p and p.is_active:
-        p.is_active = False
+    if participant and participant.is_active:
+        participant.is_active = False
         db.commit()
 
 
@@ -521,30 +536,6 @@ def get_participant(
         )
         .first()
     )
-
-
-def set_participant_muted(
-    db: Session, participant: models.Participant, muted: bool
-) -> models.Participant:
-    participant.is_muted = muted
-    db.commit()
-    db.refresh(participant)
-    return participant
-
-
-def mute_all_except_host(db: Session, meeting: models.Meeting) -> int:
-    count = 0
-    for p in list_participants(db, meeting):
-        if not p.is_host and not p.is_muted:
-            p.is_muted = True
-            count += 1
-    db.commit()
-    return count
-
-
-def remove_participant(db: Session, participant: models.Participant) -> None:
-    participant.is_active = False
-    db.commit()
 
 
 def active_participant_count(db: Session, meeting: models.Meeting) -> int:

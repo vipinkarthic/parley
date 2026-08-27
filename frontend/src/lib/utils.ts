@@ -19,34 +19,34 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-function to12h(d: Date): string {
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
+export function to12Hour(date: Date): string {
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const suffix = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${hours}:${minutes} ${suffix}`;
 }
 
 export function formatMeetingTime(iso: string | null): string {
   if (!iso) return "";
-  const d = new Date(iso);
+  const date = new Date(iso);
   const now = new Date();
-  const startOfDay = (x: Date) =>
-    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const startOfDay = (value: Date) =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
   const dayDiff = Math.round(
-    (startOfDay(d) - startOfDay(now)) / (1000 * 60 * 60 * 24)
+    (startOfDay(date) - startOfDay(now)) / (1000 * 60 * 60 * 24)
   );
-  const time = to12h(d);
+  const time = to12Hour(date);
   if (dayDiff === 0) return `Today, ${time}`;
   if (dayDiff === 1) return `Tomorrow, ${time}`;
   if (dayDiff === -1) return `Yesterday, ${time}`;
-  return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${time}`;
+  return `${WEEKDAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}, ${time}`;
 }
 
 export function dateParts(iso: string | null): { month: string; day: string } {
   if (!iso) return { month: "", day: "" };
-  const d = new Date(iso);
-  return { month: MONTHS[d.getMonth()], day: d.getDate().toString() };
+  const date = new Date(iso);
+  return { month: MONTHS[date.getMonth()], day: date.getDate().toString() };
 }
 
 export function colorFromName(name: string): string {
@@ -61,7 +61,7 @@ export function colorFromName(name: string): string {
   return palette[Math.abs(hash) % palette.length];
 }
 
-export function invitationText(m: {
+export function invitationText(meeting: {
   host: { name: string };
   topic: string;
   start_time: string | null;
@@ -69,20 +69,22 @@ export function invitationText(m: {
   meeting_number: string;
   passcode: string | null;
 }): string {
-  const when = m.start_time ? formatMeetingTime(m.start_time) : null;
+  const when = meeting.start_time
+    ? formatMeetingTime(meeting.start_time)
+    : null;
   return [
-    `${m.host.name} is inviting you to a Parley meeting.`,
+    `${meeting.host.name} is inviting you to a Parley meeting.`,
     "",
-    `Topic: ${m.topic}`,
+    `Topic: ${meeting.topic}`,
     when ? `Time: ${when}` : null,
     "",
     "Join Parley Meeting",
-    m.invite_link,
+    meeting.invite_link,
     "",
-    `Meeting ID: ${formatMeetingNumber(m.meeting_number)}`,
-    m.passcode ? `Passcode: ${m.passcode}` : null,
+    `Meeting ID: ${formatMeetingNumber(meeting.meeting_number)}`,
+    meeting.passcode ? `Passcode: ${meeting.passcode}` : null,
   ]
-    .filter((l) => l !== null)
+    .filter((line) => line !== null)
     .join("\n");
 }
 

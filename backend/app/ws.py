@@ -10,6 +10,7 @@ so nothing can be spoofed from the client.
 """
 import asyncio
 import json
+import logging
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -18,7 +19,10 @@ from starlette.concurrency import run_in_threadpool
 from . import crud, models
 from .config import ROOM_CAP, VIDEO_BUDGET
 from .database import SessionLocal
+from .schemas import SETTING_KEYS
 from .speakers import RoomSpeakers
+
+logger = logging.getLogger("parley.ws")
 
 router = APIRouter()
 
@@ -30,19 +34,12 @@ WS_BAD_PID = 4001
 WS_UNAUTHORISED = 4003
 WS_DENIED = 4004
 WS_MEETING_ENDED = 4005
-WS_SUPERSEDED = 4009
 WS_ROOM_FULL = 4006
+WS_SUPERSEDED = 4009
 
 # RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
 # Render service, and it is not an error - the client is expected to come back.
 WS_SERVICE_RESTART = 1012
-
-
-SETTING_KEYS = (
-    "waiting_room", "locked", "mute_on_entry", "join_before_host",
-    "allow_screen_share", "allow_unmute", "allow_video", "allow_rename",
-    "allow_chat", "allow_reactions",
-)
 
 
 async def _fan_out(coros) -> None:
@@ -57,6 +54,12 @@ async def _fan_out(coros) -> None:
 
 
 async def _close_quietly(ws: WebSocket, code: int) -> None:
+    """Close a socket that may already be gone.
+
+    Deliberately silent, unlike the handler's catch-all: the only thing that
+    reaches here is a socket the far end closed first, and there is nothing
+    to do about it and nothing worth logging.
+    """
     try:
         await ws.close(code=code)
     except Exception:
@@ -78,7 +81,7 @@ class Hub:
         self.shutting_down = False
 
     def socket_count(self) -> int:
-        return sum(len(r) for r in self.rooms.values()) + sum(
+        return sum(len(room) for room in self.rooms.values()) + sum(
             len(lobby) for lobby in self.lobbies.values()
         )
 
@@ -173,10 +176,18 @@ class Hub:
         return entry is not None and entry["ws"] is ws
 
     def peers(self, number: str, exclude: int) -> list[dict]:
-        return [p["info"] for pid, p in self.rooms.get(number, {}).items() if pid != exclude]
+        return [
+            peer["info"]
+            for pid, peer in self.rooms.get(number, {}).items()
+            if pid != exclude
+        ]
 
     def host_pids(self, number: str) -> list[int]:
-        return [pid for pid, p in self.rooms.get(number, {}).items() if p["info"].get("isHost")]
+        return [
+            pid
+            for pid, peer in self.rooms.get(number, {}).items()
+            if peer["info"].get("isHost")
+        ]
 
     def add_lobby(self, number: str, pid: int, ws: WebSocket, info: dict) -> None:
         self.lobbies.setdefault(number, {})[pid] = {"ws": ws, "info": info}
@@ -192,8 +203,11 @@ class Hub:
 
     def waiting_list(self, number: str) -> list[dict]:
         return [
-            {"id": p["info"]["id"], "displayName": p["info"]["displayName"]}
-            for p in self.lobbies.get(number, {}).values()
+            {
+                "id": entry["info"]["id"],
+                "displayName": entry["info"]["displayName"],
+            }
+            for entry in self.lobbies.get(number, {}).values()
         ]
 
     def lobby_entries(self, number: str) -> list[dict]:
@@ -220,7 +234,9 @@ class Hub:
         if peer:
             await self.send(peer["ws"], message)
 
-    async def broadcast(self, number: str, message: dict, exclude: int | None = None) -> None:
+    async def broadcast(
+        self, number: str, message: dict, exclude: int | None = None
+    ) -> None:
         """Fan a message out to the room, concurrently.
 
         Awaiting each send in turn makes the slowest receiver everyone else's
@@ -240,7 +256,9 @@ class Hub:
         await self._send_many(peers, message)
 
     async def broadcast_lobby(self, number: str, message: dict) -> None:
-        sockets = [p["ws"] for p in self.lobbies.get(number, {}).values()]
+        sockets = [
+            entry["ws"] for entry in self.lobbies.get(number, {}).values()
+        ]
         await self._send_many(sockets, message)
 
     async def notify_hosts_waiting(self, number: str) -> None:
@@ -312,8 +330,8 @@ def _do_set_admission(pids: list[int], meeting_id: str, admission: str) -> None:
             )
             .all()
         )
-        for p in rows:
-            p.admission = admission
+        for row in rows:
+            row.admission = admission
         if rows:
             db.commit()
     finally:
@@ -327,9 +345,9 @@ async def _set_admission(pids: list[int], meeting_id: str, admission: str) -> No
 def _do_set_waiting_room(meeting_id: str, on: bool) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            m.waiting_room = on
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            meeting.waiting_room = on
             db.commit()
     finally:
         db.close()
@@ -342,9 +360,9 @@ async def _set_waiting_room(meeting_id: str, on: bool) -> None:
 def _do_update_settings(meeting_id: str, patch: dict) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            crud.update_settings(db, m, patch)
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            crud.update_settings(db, meeting, patch)
     finally:
         db.close()
 
@@ -356,9 +374,9 @@ async def _update_settings(meeting_id: str, patch: dict) -> None:
 def _do_rename(meeting_id: str, pid: int, name: str) -> None:
     db = SessionLocal()
     try:
-        p = db.get(models.Participant, pid)
-        if p and p.meeting_id == meeting_id:
-            p.display_name = name
+        participant = db.get(models.Participant, pid)
+        if participant and participant.meeting_id == meeting_id:
+            participant.display_name = name
             db.commit()
     finally:
         db.close()
@@ -389,10 +407,10 @@ def _do_deny(meeting_id: str, pid: int) -> None:
     """
     db = SessionLocal()
     try:
-        p = db.get(models.Participant, pid)
-        if p and p.meeting_id == meeting_id:
-            p.admission = "denied"
-            p.is_active = False
+        participant = db.get(models.Participant, pid)
+        if participant and participant.meeting_id == meeting_id:
+            participant.admission = "denied"
+            participant.is_active = False
             db.commit()
     finally:
         db.close()
@@ -405,9 +423,9 @@ async def _deny(meeting_id: str, pid: int) -> None:
 def _do_end_meeting(meeting_id: str) -> None:
     db = SessionLocal()
     try:
-        m = db.get(models.Meeting, meeting_id)
-        if m:
-            crud.end_meeting(db, m)
+        meeting = db.get(models.Meeting, meeting_id)
+        if meeting:
+            crud.end_meeting(db, meeting)
     finally:
         db.close()
 
@@ -512,7 +530,7 @@ async def _admit(number: str, meeting_id: str, *targets: int) -> None:
     # reconnect: a guest who saw "admitted" and then reconnected into the
     # lobby because the write had not landed is a worse bug than a slow admit.
     await _set_admission(
-        [e["info"]["id"] for e in entries], meeting_id, "admitted"
+        [entry["info"]["id"] for entry in entries], meeting_id, "admitted"
     )
 
     for entry in entries:
@@ -529,7 +547,7 @@ async def _admit(number: str, meeting_id: str, *targets: int) -> None:
 
 
 def _lobby_pids(number: str) -> list[int]:
-    return [e["info"]["id"] for e in hub.lobby_entries(number)]
+    return [entry["info"]["id"] for entry in hub.lobby_entries(number)]
 
 
 @router.websocket("/ws/meetings/{number}")
@@ -618,7 +636,10 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 await hub.send(websocket, {"type": "pong"})
                 continue
 
-            # ignore anything from people still in the lobby - checked live so a just-admitted guest relays right away
+            # Ignore anything from someone still in the lobby. Checked
+            # against live membership rather than the admission read at
+            # connect time, so a guest admitted mid-connection starts
+            # relaying immediately instead of on their next reconnect.
             if pid not in hub.rooms.get(number, {}):
                 continue
 
@@ -664,7 +685,12 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 info["videoOn"] = bool(data.get("videoOn", info["videoOn"]))
                 await hub.broadcast(
                     number,
-                    {"type": "state", "from": pid, "muted": info["muted"], "videoOn": info["videoOn"]},
+                    {
+                        "type": "state",
+                        "from": pid,
+                        "muted": info["muted"],
+                        "videoOn": info["videoOn"],
+                    },
                     exclude=pid,
                 )
             elif mtype == "chat":
@@ -672,7 +698,12 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     continue
                 await hub.broadcast(
                     number,
-                    {"type": "chat", "from": pid, "displayName": info["displayName"], "text": str(data.get("text", ""))[:2000]},
+                    {
+                        "type": "chat",
+                        "from": pid,
+                        "displayName": info["displayName"],
+                        "text": str(data.get("text", ""))[:2000],
+                    },
                     exclude=pid,
                 )
             elif mtype == "reaction":
@@ -680,25 +711,37 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     continue
                 await hub.broadcast(
                     number,
-                    {"type": "reaction", "from": pid, "emoji": str(data.get("emoji", ""))[:8]},
+                    {
+                        "type": "reaction",
+                        "from": pid,
+                        "emoji": str(data.get("emoji", ""))[:8],
+                    },
                     exclude=pid,
                 )
             elif mtype == "hand":
                 info["hand"] = bool(data.get("raised"))
                 await hub.broadcast(
-                    number, {"type": "hand", "from": pid, "raised": info["hand"]}, exclude=pid
+                    number,
+                    {"type": "hand", "from": pid, "raised": info["hand"]},
+                    exclude=pid,
                 )
             elif mtype == "share":
                 if not info["isHost"] and not hub.setting(number, "allow_screen_share"):
                     await hub.send(websocket, {"type": "share-denied"})
                     continue
                 on = bool(data.get("on"))
-                # stash it on the peer so late joiners know about the screen share
+                # Kept on the peer's info so a late joiner is told about a
+                # screenshare that started before they arrived.
                 info["sharing"] = on
                 info["screenSid"] = data.get("streamId") if on else None
                 await hub.broadcast(
                     number,
-                    {"type": "share", "from": pid, "on": on, "streamId": info["screenSid"]},
+                    {
+                        "type": "share",
+                        "from": pid,
+                        "on": on,
+                        "streamId": info["screenSid"],
+                    },
                     exclude=pid,
                 )
             elif mtype == "rename":
@@ -724,7 +767,9 @@ async def meeting_socket(websocket: WebSocket, number: str):
             elif mtype == "remove-peer" and info["isHost"] and "target" in data:
                 target = int(data["target"])
                 await hub.send_to(number, target, {"type": "removed"})
-                await hub.broadcast(number, {"type": "peer-left", "id": target}, exclude=target)
+                await hub.broadcast(
+                    number, {"type": "peer-left", "id": target}, exclude=target
+                )
                 await _deactivate(meeting_id, target)
             elif mtype == "end-meeting" and info["isHost"]:
                 # Persisted first: `status == "ended"` is what stops a
@@ -753,10 +798,17 @@ async def meeting_socket(websocket: WebSocket, number: str):
                     await _admit(number, meeting_id, *_lobby_pids(number))
                 await _set_waiting_room(meeting_id, on)
             elif mtype == "settings" and info["isHost"]:
-                patch = {k: bool(v) for k, v in (data.get("settings") or {}).items() if k in SETTING_KEYS}
+                patch = {
+                    k: bool(v)
+                    for k, v in (data.get("settings") or {}).items()
+                    if k in SETTING_KEYS
+                }
                 if patch:
                     hub.settings.setdefault(number, {}).update(patch)
-                    await hub.broadcast(number, {"type": "settings", "settings": hub.settings[number]})
+                    await hub.broadcast(
+                        number,
+                        {"type": "settings", "settings": hub.settings[number]},
+                    )
                     if patch.get("waiting_room") is False:
                         await _admit(number, meeting_id, *_lobby_pids(number))
                     await _update_settings(meeting_id, patch)
@@ -773,9 +825,18 @@ async def meeting_socket(websocket: WebSocket, number: str):
             elif mtype == "ask-unmute" and info["isHost"] and "target" in data:
                 await hub.send_to(number, int(data["target"]), {"type": "ask-unmute"})
     except WebSocketDisconnect:
+        # Ordinary: the tab closed, or the network went away. The teardown
+        # below is the whole response.
         pass
     except Exception:
-        pass
+        # Anything else is a bug in the handler, and the socket is about to be
+        # torn down either way. Logged rather than discarded: this used to be
+        # a bare `pass`, so a failure here left no trace anywhere - no
+        # traceback, no request id, nothing to find afterwards.
+        logger.exception(
+            "signalling handler failed",
+            extra={"meeting": number, "participant": pid},
+        )
     finally:
         # Only tear down if this socket still owns the participant slot. If a
         # reconnect displaced us, the live socket is already registered under

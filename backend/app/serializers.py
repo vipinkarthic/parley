@@ -7,8 +7,11 @@ from . import crud, models, schemas, utils
 def meeting_out(
     db: Session, meeting: models.Meeting, viewer_id: int | None = None
 ) -> schemas.MeetingOut:
-    """Serialize a meeting. The passcode is only revealed to the host (the
-    meeting's owner), so it isn't leaked to anyone who knows the number."""
+    """Serialize a meeting for the API.
+
+    The passcode is only revealed to the host, so knowing a meeting number is
+    not enough to learn the passcode that goes with it.
+    """
     is_host_viewer = viewer_id is not None and viewer_id == meeting.host_id
     return schemas.MeetingOut(
         id=meeting.id,
@@ -23,7 +26,9 @@ def meeting_out(
         duration=meeting.duration,
         created_at=meeting.created_at,
         host=schemas.UserOut.model_validate(meeting.host),
-        # only the host gets the passcode in the link, else any guest hitting this endpoint could just read it out
+        # Only the host gets the passcode in the link. Anyone can reach this
+        # endpoint with a meeting number, so embedding it unconditionally
+        # would hand the passcode to exactly the people it gates.
         invite_link=utils.build_invite_link(
             meeting.meeting_number, meeting.passcode if is_host_viewer else None
         ),

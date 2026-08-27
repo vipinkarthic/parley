@@ -5,7 +5,7 @@ import type {
   MeetingSettings,
   Preferences,
   User,
-} from "./types";
+} from "@/lib/types";
 
 const BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||
@@ -57,7 +57,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (body?.detail) detail = body.detail;
     } catch {
     }
-    // stale token -> clear it and bounce to /login (auth routes handle their own 401s)
+    // A stale token: clear it and bounce to /login. Auth routes are exempt
+    // because a 401 there is the answer, not a session that expired.
     if (res.status === 401 && !path.startsWith("/auth/")) {
       clearToken();
       onUnauthorized?.();
@@ -109,10 +110,13 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  changePassword: (current_password: string, new_password: string) =>
+  changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: boolean }>("/auth/change-password", {
       method: "POST",
-      body: JSON.stringify({ current_password, new_password }),
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
     }),
   startPersonalRoom: () =>
     request<Meeting>("/api/meetings/personal", { method: "POST" }),
@@ -193,11 +197,11 @@ export const api = {
 // getRandomValues, then to a timestamp, because a slightly weaker key still
 // deduplicates a retry and a crash here would block joining entirely.
 export function newJoinKey(): string {
-  const c = globalThis.crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
-  if (typeof c?.getRandomValues === "function") {
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+  if (typeof webCrypto?.getRandomValues === "function") {
     const bytes = new Uint8Array(16);
-    c.getRandomValues(bytes);
+    webCrypto.getRandomValues(bytes);
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -213,9 +217,10 @@ export interface IceConfig {
 }
 
 // STUN-only, i.e. exactly what shipped before TURN existed. Used when the
-// fetch fails: peers with a direct path still connect, peers behind symmetric
-// NAT still cannot. Degraded, not broken.
-const STUN_ONLY: IceConfig = {
+// fetch fails, and by useMeeting as the value held before GET /api/ice
+// answers: peers with a direct path still connect, peers behind symmetric NAT
+// still cannot. Degraded, not broken.
+export const STUN_ONLY: IceConfig = {
   iceServers: [
     { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   ],

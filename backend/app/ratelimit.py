@@ -14,10 +14,10 @@ def allow(key: str, limit: int, window_seconds: int) -> bool:
     """Record a hit for `key`; return False if it exceeds `limit` per window."""
     now = time.time()
     cutoff = now - window_seconds
-    q = _hits.setdefault(key, [])
-    while q and q[0] < cutoff:
-        q.pop(0)
-    if len(q) >= limit:
+    hits = _hits.setdefault(key, [])
+    while hits and hits[0] < cutoff:
+        hits.pop(0)
+    if len(hits) >= limit:
         return False
-    q.append(now)
+    hits.append(now)
     return True

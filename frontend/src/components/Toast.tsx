@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CheckIcon, CloseIcon } from "./Icons";
+import { CheckIcon, CloseIcon } from "@/components/Icons";
 
 type ToastKind = "success" | "error" | "info";
 interface Toast {

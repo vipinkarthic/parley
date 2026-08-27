@@ -1,22 +1,26 @@
 # Render.com blueprint for the FastAPI backend.
 # Deploy: New + -> Blueprint, point at this repo (Render reads this file).
 #
-# `name` MUST match the live service, because Render treats a renamed service
-# in a blueprint as a brand new one - new URL, no environment variables
-# carried over. That already happened once: this file said `parley-api` while
-# the live service was named differently, and a sync on 2026-09-09 created a
-# second web service (`parley-api`, https://parley-api-jtza.onrender.com)
-# which has no env vars and has been stuck in update_failed ever since. It
-# still auto-deploys from main, so it fails again on every push.
+# `name` MUST stay `parley-meeting`.
 #
-# The live service is `parley-meeting`, which serves
-# https://zoom-clone-api-in8u.onrender.com - the URL baked into the deployed
-# frontend bundle and fronted by parleyapi.vipinkarthic.com. The name is
-# historical; the URL is what matters and cannot be changed.
+# Render matches a blueprint to an existing service by name. Rename it here
+# and the sync does not rename the service - it creates a second one, with no
+# environment variables and its own database. That is not hypothetical: a sync
+# on 2026-09-09 did exactly that, and the duplicate sat broken until it was
+# deleted on 2026-09-14.
 #
-# So this file now names the real service. Before syncing the blueprint,
-# delete or suspend the orphaned `parley-api` service, or a sync will simply
-# feed the broken duplicate again.
+# The public hostname is NOT derived from `name`. It comes from the service's
+# `slug`, which is fixed when the service is created and never follows a
+# rename - here the slug is `zoom-clone-api-in8u`, left over from the original
+# project name, so the service answers on
+# https://zoom-clone-api-in8u.onrender.com no matter what it is called.
+#
+# The only way to a tidier .onrender.com URL is a brand new service, which
+# means new env vars, a new DATABASE_URL, and the duplicate accident again.
+# It is not worth it, and it is not needed: the service is fronted by
+# https://parleyapi.vipinkarthic.com, which is the name to use everywhere -
+# in the frontend build, in documentation, and on a CV. Treat the
+# onrender.com hostname as an implementation detail.
 services:
   - type: web
     name: parley-meeting
@@ -38,9 +42,13 @@ services:
       - key: JWT_SECRET
         generateValue: true          # Render generates a strong random secret
       - key: FRONTEND_URL
-        sync: false                  # set to your Vercel URL (e.g. https://your-app.vercel.app)
+        sync: false                  # https://parley.vipinkarthic.com - builds the invite links
       - key: CORS_ORIGINS
-        sync: false                  # your Vercel URL; *.vercel.app is also allowed automatically
+        sync: false                  # https://parley.vipinkarthic.com. The custom domain MUST be
+                                     # listed: main.py's allow_origin_regex only covers
+                                     # *.vercel.app, so a custom domain matches nothing and gets
+                                     # a 400 preflight. No trailing slash, scheme required -
+                                     # Starlette compares the Origin header as an exact string.
       - key: SMTP_USER
         sync: false                  # sending mailbox; required with SMTP_PASS for real email
       - key: SMTP_PASS
@@ -52,3 +60,20 @@ services:
         value: "false"               # demo accounts always seed; sample meetings would
                                      # be seeded once against a persistent DB and then
                                      # sit at a fixed past date forever. Keep off.
+      # TURN. Declared here ONLY so a blueprint sync cannot drop them: an env
+      # var absent from the blueprint can be removed on sync, and falling back
+      # to the in-code Open Relay default is not a degradation - that endpoint
+      # refuses every allocation, so peers behind symmetric NAT lose video
+      # outright. `sync: false` keeps the real values in the dashboard, which
+      # is where they belong.
+      #
+      # PASTE THESE INTO THE DASHBOARD BY HAND, NEVER THROUGH A SHELL. The "?"
+      # in "?transport=tcp" is a glob metacharacter; a value that loses it
+      # makes `new RTCPeerConnection` THROW rather than degrade, and that took
+      # video down in production until 2026-09-14.
+      - key: TURN_URLS
+        sync: false                  # comma-separated; keep every "?transport=tcp" intact
+      - key: TURN_USERNAME
+        sync: false                  # from the relay provider, not a Parley account
+      - key: TURN_CREDENTIAL
+        sync: false                  # rotate here; /api/ice serves it, so no rebuild needed

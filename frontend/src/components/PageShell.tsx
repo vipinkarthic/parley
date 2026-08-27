@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Navbar } from "./Navbar";
-import { AuthGuard } from "./AuthGuard";
+import { Navbar } from "@/components/Navbar";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export function PageShell({
   title,

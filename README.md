@@ -51,8 +51,8 @@ it is emailed and never rendered.
 | Auth       | **JWT** (PyJWT) + **bcrypt** password hashing + email **OTP** over SMTP               |
 
 The only libraries beyond the core stack are small, standard helpers (PyJWT,
-bcrypt, python-dotenv, python-dateutil on the backend; nothing beyond React/Next
-on the frontend - the API client uses the native `fetch`).
+bcrypt, python-dotenv on the backend; nothing beyond React/Next on the
+frontend - the API client uses the native `fetch`).
 
 ---
 
@@ -175,6 +175,7 @@ parley/
 │   │   ├── deps.py               # Auth dependencies (get_current_user)
 │   │   ├── utils.py              # Meeting-number / passcode / invite-link generation
 │   │   ├── seed.py               # Demo accounts + optional sample meetings
+│   │   ├── speakers.py           # Server-authoritative active-speaker ranking, with hysteresis
 │   │   ├── ws.py                 # WebSocket signalling hub (WebRTC + presence + host controls)
 │   │   └── routers/
 │   │       ├── auth.py           # Signup (OTP), login, change password, current user
@@ -183,8 +184,17 @@ parley/
 │   │       └── users.py          # Contacts, profile, preferences
 │   ├── alembic/                  # Migration history (Alembic owns the schema)
 │   ├── tests/                    # pytest; runs on SQLite or Postgres unchanged
-│   ├── tools/turn_probe.py       # Verify a TURN account really allocates a relay
+│   ├── tools/                    # Operational scripts, none imported by the app
+│   │   ├── loadtest.py           # Ramp real browsers into a meeting; how ROOM_CAP was set
+│   │   ├── bench_signalling.py   # Broadcast fan-out and event-loop blocking
+│   │   ├── verify_paging.py      # Prove paging drops tracks with zero SDP exchange
+│   │   ├── turn_probe.py         # Verify a TURN account really allocates a relay
+│   │   ├── turn_setup.py         # Fetch metered.ca credentials and prove they work
+│   │   └── screenshots.py        # Regenerate the README images
+│   ├── alembic.ini
+│   ├── pytest.ini
 │   ├── requirements.txt
+│   ├── requirements-dev.txt      # Test-only deps, kept out of the Render build
 │   ├── Procfile                  # Backend start command (Render / Railway)
 │   └── .env.example
 │
@@ -301,7 +311,8 @@ and is deleted.
 
 ## Getting Started (Local)
 
-**Prerequisites:** Node.js 18+ and Python 3.10+.
+**Prerequisites:** Node.js 18+ and Python 3.12 (`render.yaml` pins 3.12.6;
+3.10+ will run, but 3.12 is what is built and tested).
 
 ### 1. Backend
 
@@ -352,10 +363,18 @@ pytest                                          # SQLite, offline
 TEST_DATABASE_URL=postgresql://... pytest       # against real Postgres
 ```
 
-The suite builds its schema by running the migrations, so a green run also
-proves `alembic upgrade head` works from an empty database. It is
-engine-agnostic on purpose: running it against SQLite and then Postgres is
-what makes it a cutover check rather than a one-off.
+`pytest.ini` sets `testpaths` and `pythonpath`, so `pytest` with no arguments
+is the whole invocation - run it from `backend/`.
+
+The suite builds its schema by running the migrations rather than
+`create_all()`, so a green run also proves `alembic upgrade head` works from
+an empty database. It is engine-agnostic on purpose: running it against SQLite
+and then against Postgres is what makes it a cutover check rather than a
+one-off.
+
+> The suite **drops every table** before and after the run. It refuses to
+> touch a remote database unless `PARLEY_TEST_ALLOW_REMOTE=1` is set, and that
+> should only ever point at a disposable one.
 
 **End-to-end suite** - 12 Playwright tests over three critical flows
 (signup -> OTP, create -> join, host controls):
@@ -436,6 +455,11 @@ you're in.
 | `SMTP_FROM_NAME`   | `Parley`                             | Display name on OTP emails                       |
 | `SMTP_TIMEOUT`     | `15`                                 | SMTP socket timeout (seconds)                    |
 | `OTP_TTL_MINUTES`  | `10`                                 | OTP validity window                              |
+| `OTP_MAX_ATTEMPTS` | `5`                                  | Wrong codes before the pending signup is discarded |
+| `SMTP_HOST`        | `smtp.gmail.com`                     | SMTP server for OTP email                        |
+| `SMTP_PORT`        | `587`                                | SMTP port (STARTTLS)                             |
+| `ROOM_CAP`         | `10`                                 | Hard participant cap, enforced on both the join endpoint and the socket - see *Known limits* |
+| `VIDEO_BUDGET`     | `5`                                  | Remote cameras a client subscribes to at once (the "top-5 by rank") |
 | `STUN_URLS`        | two Google STUN servers              | Comma-separated STUN URLs served by `GET /api/ice` |
 | `TURN_URLS`        | Open Relay (`:80`, `:443`, `turns:`) | Comma-separated TURN URLs - the relay path        |
 | `TURN_USERNAME`    | `openrelayproject`                   | TURN username; replace for a dedicated account   |
@@ -551,8 +575,9 @@ Two things raise the ceiling without one, and both ship:
   encode and one upload alive.
 - **Encoder caps.** `maxBitrate`, `scaleResolutionDownBy` and `maxFramerate`
   step down as the number of peers receiving your camera grows - 1.2 Mbps at
-  one receiver, 200 kbps and quarter framerate past six - with H.264
-  preferred so a hardware encoder can do the work.
+  full resolution and 30 fps with one receiver, 200 kbps at a third of the
+  resolution and half the framerate past six - with H.264 preferred so a
+  hardware encoder can do the work.
 
 **The room cap is 10, and it is measured.** It is enforced server-side on
 both the join endpoint and the websocket, so it is a real limit rather than
@@ -739,8 +764,10 @@ add `NEXT_PUBLIC_API_BASE` = your backend URL, deploy.
 
 **Backend -> Render / Railway:** new Web Service, **Root Directory** `backend`,
 build `pip install -r requirements.txt`, start
-`uvicorn app.main:app --host 0.0.0.0 --port $PORT` (a `Procfile` and
-`render.yaml` are included). Set `FRONTEND_URL`, `CORS_ORIGINS`, a strong
+`alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+(a `Procfile` and `render.yaml` are included, both carrying exactly that
+command). The migration step is not optional: Alembic owns the schema and the
+app refuses to boot if its tables are missing. Set `FRONTEND_URL`, `CORS_ORIGINS`, a strong
 `JWT_SECRET`, and `SMTP_USER` + `SMTP_PASS` for real email. The frontend derives
 the signalling URL from `NEXT_PUBLIC_API_BASE` (`https` -> `wss`), so an HTTPS
 backend works out of the box.
@@ -751,10 +778,17 @@ checks its tables exist and refuses to boot with a message naming the fix,
 rather than creating them itself and letting the live schema drift away from
 the migration history.
 
-**Health checks.** Point the platform's check at `/healthz`, which is liveness
-only. `/readyz` also probes the database and is the wrong target for a health
-check on a free-tier Postgres: a database blip would fail the check and take
-the API down with it.
+**Health checks.** `render.yaml` ships `healthCheckPath: /`, and that is
+deliberate rather than an oversight: the live service already has its check
+pointed there, and moving it would need the dashboard change to land at the
+same moment as the deploy. `/` and `/healthz` are both liveness-only and
+neither touches the database, so the choice costs nothing.
+
+What matters is what **not** to point it at. `/readyz` also probes the
+database, which makes it the wrong target on a free-tier Postgres: a database
+blip would fail the check and take the whole API down with it. Neon also
+sleeps after ~5 minutes idle, so a health check that opened a connection would
+hold the database awake around the clock.
 
 **Keeping a free instance warm.** A free web service spins down after ~15
 minutes idle; a cold start here measured 15.4 seconds. `rte`'s `parley-ping`

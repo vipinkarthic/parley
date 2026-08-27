@@ -10,8 +10,8 @@ import {
   formatMeetingTime,
   invitationText,
 } from "@/lib/utils";
-import { useToast } from "./Toast";
-import { ClockIcon, MoreIcon } from "./Icons";
+import { useToast } from "@/components/Toast";
+import { ClockIcon, MoreIcon } from "@/components/Icons";
 
 export function MeetingListItem({
   meeting,

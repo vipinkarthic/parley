@@ -98,7 +98,10 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     installed = _install_sigterm_handler()
-    logger.info("Parley API ready (database: %s)", engine.url.render_as_string(hide_password=True))
+    logger.info(
+        "Parley API ready (database: %s)",
+        engine.url.render_as_string(hide_password=True),
+    )
     yield
     # Catch-all for a shutdown that did not come through SIGTERM - Ctrl-C, or
     # a reload. Harmless if the handler already ran.
@@ -134,8 +137,9 @@ async def request_context(request: Request, call_next):
     otherwise one is minted. It goes back out on the response, which is what
     makes an error a user reports findable in the logs.
 
-    HTTP only - ASGI http middleware is never invoked for a websocket scope,
-    and the signalling socket does its own logging.
+    HTTP only: ASGI http middleware is never invoked for a websocket scope,
+    so the signalling socket gets no request id and no per-request line from
+    here. It logs its own failures under `parley.ws`.
     """
     incoming = (request.headers.get(REQUEST_ID_HEADER) or "").strip()
     request_id = incoming[:64] or uuid.uuid4().hex[:12]
@@ -183,9 +187,12 @@ app.include_router(ws_router)
 
 @app.get("/", tags=["health"])
 def health():
-    """The original health route. Kept as-is: Render's deployed service has
-    its health check pointed here, and changing it would need a dashboard
-    change to land at the same moment as the code."""
+    """The original health route.
+
+    Kept as-is: Render's deployed service has its health check pointed here,
+    and changing it would need a dashboard change to land at the same moment
+    as the code.
+    """
     return {"status": "ok", "service": "parley-api"}
 
 

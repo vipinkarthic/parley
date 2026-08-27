@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { CloseIcon } from "./Icons";
+import { CloseIcon } from "@/components/Icons";
 
 export function Modal({
   open,

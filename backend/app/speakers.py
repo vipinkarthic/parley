@@ -96,7 +96,7 @@ class RoomSpeakers:
     _last_broadcast_ms: float = float("-inf")
     _last_sent: tuple[tuple[int, ...], tuple[int, ...]] | None = None
 
-    # -- membership ---------------------------------------------------------
+    # --- Membership -------------------------------------------------------
 
     def add(self, pid: int, now_ms: float) -> None:
         if pid not in self.reports:
@@ -111,7 +111,7 @@ class RoomSpeakers:
     def __bool__(self) -> bool:
         return bool(self.reports)
 
-    # -- input --------------------------------------------------------------
+    # --- Input ------------------------------------------------------------
 
     def report(self, pid: int, on: bool, level: int, now_ms: float) -> None:
         """Record one client's report about its own microphone."""
@@ -128,21 +128,28 @@ class RoomSpeakers:
             # an "off", which is exactly the message most likely to be lost.
             entry.speaking = False
 
-    # -- output -------------------------------------------------------------
+    # --- Output -----------------------------------------------------------
 
-    def _prune(self, now_ms: float) -> None:
+    def _decay_stale(self, now_ms: float) -> None:
+        """Zero the level of anyone whose reports have gone quiet.
+
+        Named for what it does. It was `_prune`, which claimed a removal that
+        never happens - deliberately, per the comment below.
+        """
         stale = [
             pid
-            for pid, r in self.reports.items()
-            if now_ms - r.last_report_ms > REPORT_STALE_MS
+            for pid, report in self.reports.items()
+            if now_ms - report.last_report_ms > REPORT_STALE_MS
             and (
-                r.last_spoke_ms is None
-                or now_ms - r.last_spoke_ms > REPORT_STALE_MS
+                report.last_spoke_ms is None
+                or now_ms - report.last_spoke_ms > REPORT_STALE_MS
             )
         ]
         for pid in stale:
-            # Only drop the *report*, never the participant: someone who has
-            # simply not spoken is still in the room and still rankable.
+            # The entry stays. Someone who has simply stopped reporting is
+            # still in the room and still rankable - they just rank as silent,
+            # which is what zeroing the level achieves. Removing them would
+            # lose their joined_seq and reshuffle the idle tier.
             self.reports[pid].level = 0
             self.reports[pid].speaking = False
 
@@ -150,9 +157,9 @@ class RoomSpeakers:
         """Who counts as speaking, after decay."""
         return sorted(
             pid
-            for pid, r in self.reports.items()
-            if r.last_spoke_ms is not None
-            and now_ms - r.last_spoke_ms <= HOLD_MS
+            for pid, report in self.reports.items()
+            if report.last_spoke_ms is not None
+            and now_ms - report.last_spoke_ms <= HOLD_MS
         )
 
     def ranked(self, now_ms: float, limit: int = RANK_LIMIT) -> list[int]:
@@ -165,20 +172,22 @@ class RoomSpeakers:
         2. spoke recently enough to still hold their place, most recent first
         3. everyone else, in join order
         """
-        self._prune(now_ms)
+        self._decay_stale(now_ms)
         speaking = []
         holding = []
         idle = []
-        for pid, r in self.reports.items():
+        for pid, report in self.reports.items():
             since = (
-                None if r.last_spoke_ms is None else now_ms - r.last_spoke_ms
+                None
+                if report.last_spoke_ms is None
+                else now_ms - report.last_spoke_ms
             )
             if since is not None and since <= HOLD_MS:
-                speaking.append((-r.level, r.joined_seq, pid))
+                speaking.append((-report.level, report.joined_seq, pid))
             elif since is not None and since <= MIN_RANK_HOLD_MS:
-                holding.append((since, r.joined_seq, pid))
+                holding.append((since, report.joined_seq, pid))
             else:
-                idle.append((r.joined_seq, pid))
+                idle.append((report.joined_seq, pid))
 
         order = (
             [pid for *_, pid in sorted(speaking)]
@@ -194,9 +203,11 @@ class RoomSpeakers:
             "speaking": self.speaking_now(now_ms),
         }
 
-    # -- broadcast gating ---------------------------------------------------
+    # --- Broadcast gating -------------------------------------------------
 
-    def due(self, now_ms: float, video_budget: int, limit: int = RANK_LIMIT):
+    def due(
+        self, now_ms: float, video_budget: int, limit: int = RANK_LIMIT
+    ) -> dict | None:
         """Return a message to broadcast, or None.
 
         Two independent gates. The rate limit stops a busy room generating a

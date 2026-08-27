@@ -33,16 +33,12 @@ def generate_passcode(length: int = 6) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def format_meeting_number(number: str) -> str:
-    """Format 11 digits as 'XXX XXXX XXXX' for display."""
-    if len(number) == 11:
-        return f"{number[:3]} {number[3:7]} {number[7:]}"
-    return number
-
-
 def build_invite_link(meeting_number: str, passcode: str | None = None) -> str:
-    """Invite link with the passcode embedded in the query string, so link
-    recipients don't have to type it while ID-only joiners still must."""
+    """Build an invite link, optionally carrying the passcode.
+
+    The passcode rides in the query string so link recipients do not have to
+    type it, while someone joining by meeting ID alone still must.
+    """
     link = f"{FRONTEND_URL}/j/{meeting_number}"
     if passcode:
         link += f"?pwd={passcode}"

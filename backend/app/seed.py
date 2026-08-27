@@ -3,14 +3,13 @@
 Idempotent: demo accounts are created only if missing, and sample meetings are
 seeded once, so restarting the server never duplicates anything.
 """
-import uuid
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from . import models, utils
-from .models import _now
+from . import crud, models, utils
 from .config import SEED_SAMPLE_DATA
+from .models import utcnow
 from .security import hash_password
 
 # Ready-to-use demo logins so the app can be tested without going through the
@@ -24,37 +23,28 @@ DEMO_ACCOUNTS = [
 
 
 def seed_demo_accounts(db: Session) -> None:
-    """Create the demo accounts if they don't already exist (verified, so they
-    can log in straight away)."""
-    for acc in DEMO_ACCOUNTS:
+    """Create the demo accounts, if they do not already exist.
+
+    They are created verified, so they can log in without going through the
+    email OTP flow.
+    """
+    for account in DEMO_ACCOUNTS:
         exists = (
-            db.query(models.User).filter(models.User.email == acc["email"]).first()
+            db.query(models.User).filter(models.User.email == account["email"]).first()
         )
         if exists:
             continue
         db.add(
             models.User(
-                name=acc["name"],
-                email=acc["email"],
+                name=account["name"],
+                email=account["email"],
                 password_hash=hash_password(DEMO_PASSWORD),
                 is_verified=True,
-                avatar_color=acc["color"],
+                avatar_color=account["color"],
                 pmi=utils.generate_meeting_number(db),
             )
         )
     db.commit()
-
-
-def _make_meeting(db: Session, **kwargs) -> models.Meeting:
-    m = models.Meeting(
-        id=uuid.uuid4().hex,
-        meeting_number=utils.generate_meeting_number(db),
-        passcode=utils.generate_passcode(),
-        **kwargs,
-    )
-    db.add(m)
-    db.flush()
-    return m
 
 
 def seed_database(db: Session) -> None:
@@ -71,7 +61,7 @@ def seed_database(db: Session) -> None:
     if user is None:
         return
 
-    now = _now()
+    now = utcnow()
 
     upcoming = [
         {
@@ -100,8 +90,9 @@ def seed_database(db: Session) -> None:
         },
     ]
     for data in upcoming:
-        _make_meeting(
+        crud.new_meeting(
             db,
+            commit=False,
             host_id=user.id,
             meeting_type="scheduled",
             status="scheduled",
@@ -126,8 +117,9 @@ def seed_database(db: Session) -> None:
         },
     ]
     for data in recent:
-        _make_meeting(
+        crud.new_meeting(
             db,
+            commit=False,
             host_id=user.id,
             meeting_type="scheduled",
             status="ended",

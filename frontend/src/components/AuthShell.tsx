@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ParleyLogo } from "./ParleyLogo";
-import { CheckIcon } from "./Icons";
+import { ParleyLogo } from "@/components/ParleyLogo";
+import { CheckIcon } from "@/components/Icons";
 
 export function AuthShell({
   headerRight,

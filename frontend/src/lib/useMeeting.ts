@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchIceConfig, type IceConfig } from "./api";
-import type { MeetingSettings } from "./types";
+import { STUN_ONLY, fetchIceConfig, type IceConfig } from "@/lib/api";
+import type { MeetingSettings, WaitingPerson } from "@/lib/types";
+import { to12Hour } from "@/lib/utils";
 
 export interface RemotePeer {
   id: number;
@@ -31,11 +32,6 @@ export interface FloatingReaction {
   emoji: string;
 }
 
-export interface WaitingPerson {
-  id: number;
-  displayName: string;
-}
-
 interface PeerBox {
   pc: RTCPeerConnection;
   streams: Map<string, MediaStream>;
@@ -45,15 +41,6 @@ interface PeerBox {
   // swapping the track on it, never by touching the transceiver.
   cameraSender: RTCRtpSender | null;
 }
-
-// Used only until GET /api/ice answers. STUN alone cannot relay media, so a
-// peer behind symmetric NAT or a corporate firewall has no path at all with
-// this list - which is why the real one is fetched rather than compiled in.
-const ICE_FALLBACK: IceConfig = {
-  iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  ],
-};
 
 const DEFAULT_SETTINGS: MeetingSettings = {
   waiting_room: true,
@@ -73,15 +60,6 @@ function wsBase(): string {
     process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ||
     "http://localhost:8000";
   return base.replace(/^http/, "ws");
-}
-
-function nowTime(): string {
-  const d = new Date();
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
 }
 
 let seq = 1;
@@ -148,15 +126,24 @@ const ENCODER_TIERS: {
   },
 ];
 
-// Close codes the client must not retry: the participant is not coming back
-// into this meeting, so retrying would be an infinite loop against a server
-// that is answering correctly. See the matching constants in ws.py.
+// The server's application close codes, named here as they are in ws.py.
+// The 4000-4999 range is reserved for the application by the WebSocket spec.
+const WS_BAD_PID = 4001; // malformed participant id
+const WS_UNAUTHORISED = 4003; // token rejected
+const WS_DENIED = 4004; // the host denied this guest
+const WS_MEETING_ENDED = 4005; // the meeting has ended
+const WS_ROOM_FULL = 4006; // the room is full
+
+// Terminal for this participant: they are not coming back into this meeting,
+// so retrying would be an infinite loop against a server that is answering
+// correctly. 4009 is deliberately absent - "this socket was replaced" means
+// the newer socket carries on, and this one simply stops.
 const TERMINAL_CLOSE_CODES = new Set([
-  4001, // malformed participant id
-  4003, // token rejected
-  4004, // the host denied this guest
-  4005, // the meeting has ended
-  4006, // the room is full
+  WS_BAD_PID,
+  WS_UNAUTHORISED,
+  WS_DENIED,
+  WS_MEETING_ENDED,
+  WS_ROOM_FULL,
 ]);
 
 export interface UseMeetingOptions {
@@ -226,7 +213,7 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Map<number, PeerBox>>(new Map());
-  const iceConfigRef = useRef<IceConfig>(ICE_FALLBACK);
+  const iceConfigRef = useRef<IceConfig>(STUN_ONLY);
   const startedRef = useRef(false);
   const stateRef = useRef({ muted: !initialMicOn, videoOn: initialCamOn });
   const localStreamRef = useRef<MediaStream | null>(localStream);
@@ -257,7 +244,8 @@ export function useMeeting(opts: UseMeetingOptions) {
 
   useEffect(() => {
     localStreamRef.current = localStream;
-    // keep the real tracks matching the mic/cam state, else the UI says muted while audio is still live
+    // Keep the real tracks in step with the mic/cam state. Without this the
+    // UI can say muted while the track is still live and still sending.
     if (localStream) {
       localStream.getAudioTracks().forEach((t) => (t.enabled = !stateRef.current.muted));
       localStream.getVideoTracks().forEach((t) => (t.enabled = stateRef.current.videoOn));
@@ -449,11 +437,36 @@ export function useMeeting(opts: UseMeetingOptions) {
       const existing = pcsRef.current.get(peerId);
       if (existing) return existing.pc;
 
+      // A bad ICE server entry makes this THROW, not degrade - and a throw
+      // here takes the whole meeting down rather than one relay path.
+      //
+      // fetchIceConfig already falls back to STUN_ONLY, but only when the
+      // *fetch* fails. A successful fetch of a malformed payload sails past
+      // it, which is exactly what happened in production on 2026-09-14: a
+      // TURN_URLS value had lost the "?" from "?transport=tcp" on its way
+      // through a shell, and the constructor rejected it outright - Chrome
+      // with `SyntaxError: Invalid port`, Firefox with `NS_ERROR_UNEXPECTED`.
+      // Video was dead, not merely unrelayed.
+      //
+      // So: fall back to STUN and carry on. Peers with a direct path still
+      // connect; peers behind symmetric NAT still cannot, which is the same
+      // position as having no relay configured at all. Degraded beats dead.
+      // The fallback is latched into the ref so the next peer does not repeat
+      // a construction already known to fail.
       const cfg = iceConfigRef.current;
-      const pc = new RTCPeerConnection({
-        iceServers: cfg.iceServers,
-        iceCandidatePoolSize: cfg.iceCandidatePoolSize,
-      });
+      let pc: RTCPeerConnection;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: cfg.iceServers,
+          iceCandidatePoolSize: cfg.iceCandidatePoolSize,
+        });
+      } catch {
+        iceConfigRef.current = STUN_ONLY;
+        pc = new RTCPeerConnection({
+          iceServers: STUN_ONLY.iceServers,
+          iceCandidatePoolSize: cfg.iceCandidatePoolSize,
+        });
+      }
       const box: PeerBox = {
         pc,
         streams: new Map(),
@@ -581,7 +594,7 @@ export function useMeeting(opts: UseMeetingOptions) {
       if (!trimmed) return;
       setMessages((m) => [
         ...m,
-        { id: seq++, from: "me", sender: myNameRef.current, text: trimmed, self: true, time: nowTime() },
+        { id: seq++, from: "me", sender: myNameRef.current, text: trimmed, self: true, time: to12Hour(new Date()) },
       ]);
       send({ type: "chat", text: trimmed });
     },
@@ -877,7 +890,7 @@ export function useMeeting(opts: UseMeetingOptions) {
         case "chat":
           setMessages((m) => [
             ...m,
-            { id: seq++, from: msg.from, sender: msg.displayName, text: msg.text, self: false, time: nowTime() },
+            { id: seq++, from: msg.from, sender: msg.displayName, text: msg.text, self: false, time: to12Hour(new Date()) },
           ]);
           break;
         case "reaction":
