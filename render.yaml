@@ -52,10 +52,9 @@ services:
       - key: SMTP_USER
         sync: false                  # sending mailbox; required with SMTP_PASS for real email
       - key: SMTP_PASS
-        sync: false                  # Gmail App Password. REQUIRED in production: without
-                                     # it the signup OTP is returned in the API response,
-                                     # so the service now refuses to boot rather than
-                                     # quietly handing out verification codes.
+        sync: false                  # Gmail App Password, from a dedicated mailbox.
+                                     # Without it signup returns 503 rather than handing
+                                     # the code back. Nothing else needs a mailer.
       - key: DATABASE_URL
         sync: false                  # Neon POOLED string (host contains "-pooler").
                                      # Required: the app refuses to boot without it.

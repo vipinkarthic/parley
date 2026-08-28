@@ -75,6 +75,27 @@ def _send_otp_in_background(email: str, code: str) -> None:
         logger.error("background OTP delivery to %s failed: %s", email, exc)
 
 
+def _dev_code(email_sent: bool, code: str) -> str | None:
+    """The code only ever rides in the response outside production."""
+    if email_sent or config.IS_PRODUCTION:
+        return None
+    return code
+
+
+def _require_mailer() -> None:
+    """Refuse signup rather than hand the code back in the response.
+
+    Only signup needs a mailer, so the rest of the service stays up.
+    """
+    if config.IS_PRODUCTION and not config.EMAIL_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Sign-ups are temporarily unavailable. Please try again later."
+            ),
+        )
+
+
 def _dispatch_otp(background: BackgroundTasks, email: str, code: str) -> bool:
     """Queue the OTP and report whether a real email is on its way.
 
@@ -106,6 +127,7 @@ def request_signup_otp(
 ):
     _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
+    _require_mailer()
 
     if crud.get_user_by_email(db, data.email):
         # Answering differently told any caller whether the address is
@@ -128,7 +150,7 @@ def request_signup_otp(
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
-        dev_code=None if email_sent else code,
+        dev_code=_dev_code(email_sent, code),
     )
 
 
@@ -141,6 +163,7 @@ def resend_signup_otp(
 ):
     _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
+    _require_mailer()
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
         # Same shape as a real resend, so nothing distinguishes the two.
@@ -160,7 +183,7 @@ def resend_signup_otp(
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
-        dev_code=None if email_sent else code,
+        dev_code=_dev_code(email_sent, code),
     )
 
 

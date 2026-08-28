@@ -156,11 +156,11 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
 
 if IS_PRODUCTION and not EMAIL_ENABLED:
-    # Without a mailer the signup route returns the OTP to the caller.
-    raise RuntimeError(
-        "SMTP_USER and SMTP_PASS must both be set when APP_ENV=production. "
-        "Without them the signup OTP is returned in the API response, which "
-        "would let anyone verify an address they do not control."
+    # Signup refuses rather than leaking the code. Nothing else needs a
+    # mailer, so the rest of the service stays up.
+    logger.warning(
+        "No SMTP credentials, so signup is disabled. Login, meetings and "
+        "joining are unaffected. Set SMTP_USER and SMTP_PASS to re-enable it."
     )
 
 # --- WebRTC ICE -----------------------------------------------------------

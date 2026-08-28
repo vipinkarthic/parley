@@ -257,3 +257,64 @@ def test_the_public_meeting_view_does_not_leak_the_host_identity(client):
     assert "email" not in host
     assert "pmi" not in host
     assert body.json()["passcode"] is None
+
+
+# Signup must refuse rather than hand the OTP back
+
+
+def test_production_without_a_mailer_refuses_signup(client, monkeypatch):
+    """Only signup needs SMTP, so the rest of the service stays up."""
+    from app import config
+
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+
+    r = client.post(
+        "/auth/signup/request-otp",
+        json={"name": "X", "email": unique_email("nomail"), "password": "hunter2222"},
+    )
+    assert r.status_code == 503
+    assert "dev_code" not in r.text
+
+    resend = client.post(
+        "/auth/signup/resend-otp", json={"email": unique_email("nomail")}
+    )
+    assert resend.status_code == 503
+
+
+def test_the_rest_of_the_api_survives_a_missing_mailer(client, monkeypatch):
+    """Refusing to boot over a signup dependency took meetings down with it."""
+    from app import config
+
+    token, _ = signup(client, unique_email("survives"))
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/auth/me", headers=auth_header(token)).status_code == 200
+    created = client.post(
+        "/api/meetings/instant", json={"topic": "Still up"}, headers=auth_header(token)
+    )
+    assert created.status_code == 201
+    number = created.json()["meeting_number"]
+    joined = client.post(
+        f"/api/meetings/{number}/join",
+        json={"display_name": "Guest", "passcode": created.json()["passcode"]},
+    )
+    assert joined.status_code == 201
+
+
+def test_the_code_never_rides_in_a_production_response(client, monkeypatch):
+    """A mailer that is configured but failing must not fall back to this."""
+    from app import config
+
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr("app.routers.auth.send_otp_email", lambda *a, **k: True)
+
+    r = client.post(
+        "/auth/signup/request-otp",
+        json={"name": "X", "email": unique_email("prod"), "password": "hunter2222"},
+    )
+    assert r.status_code == 200
+    assert r.json()["dev_code"] is None
