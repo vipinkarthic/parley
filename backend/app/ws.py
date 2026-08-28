@@ -38,16 +38,10 @@ WS_ROOM_FULL = 4006
 WS_SUPERSEDED = 4009
 WS_TOO_MUCH = 4008
 
-# uvicorn will hand us a frame up to ws_max_size, which defaults to 16 MiB.
-# Nothing this protocol carries needs anything like that: the largest ordinary
-# message is an SDP offer, which is a few kilobytes. Everything past this is
-# either a bug or someone making the server parse megabytes on their behalf.
+# uvicorn allows 16 MiB. An SDP offer is a few kilobytes.
 MAX_MESSAGE_BYTES = 64 * 1024
 
-# A per-socket ceiling on messages. One inbound chat or state change fans out
-# to the whole room, so an unthrottled sender costs ROOM_CAP-1 sends each time.
-# High enough not to bother a real client (ICE candidates arrive in bursts),
-# low enough that a flood is refused rather than relayed.
+# One message fans out to the room, so a flood amplifies.
 MAX_MESSAGES_PER_WINDOW = 240
 MESSAGE_WINDOW_SECONDS = 10.0
 
@@ -166,10 +160,7 @@ class Hub:
             if not room:
                 self.rooms.pop(number, None)
                 self.speakers.pop(number, None)
-                # Settings were written on every connect and never dropped, so
-                # the process kept one entry per meeting it had ever hosted.
-                # Only safe to discard once the lobby is empty too, since a
-                # waiting guest still reads waiting_room off it.
+                # A waiting guest still reads waiting_room off this.
                 if not self.lobbies.get(number):
                     self.settings.pop(number, None)
         ranking = self.speakers.get(number)
@@ -429,8 +420,7 @@ def _do_evict(meeting_id: str, pid: int) -> None:
 
 
 async def _evict(meeting_id: str, pid: int) -> None:
-    """Persisted before the socket is told, for the same reason `deny` is:
-    a reconnect re-reads admission and must not be able to undo the decision."""
+    """Persisted first, since a reconnect re-reads admission."""
     await run_in_threadpool(_do_evict, meeting_id, pid)
 
 
@@ -658,8 +648,7 @@ async def meeting_socket(websocket: WebSocket, number: str):
             if not hub.setting(number, "waiting_room"):
                 await _admit(number, meeting_id, *_lobby_pids(number))
 
-    # Per-socket flood window. Deliberately local: it dies with the socket,
-    # so it cannot grow the way a keyed global table can.
+    # Local to the socket, so it cannot grow the way a keyed table can.
     window_started = time.monotonic()
     messages_in_window = 0
 
@@ -835,10 +824,8 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 await hub.send_to(number, int(data["target"]), {"type": "force-mute"})
             elif mtype == "remove-peer" and info["isHost"] and "target" in data:
                 target = int(data["target"])
-                # Persisted first. Telling the client and clearing is_active
-                # was the whole implementation, and neither survives a
-                # reconnect - the removed participant came straight back with
-                # the same pid and token.
+                # Persisted first. Neither the message nor is_active
+                # survives a reconnect.
                 await _evict(meeting_id, target)
                 removed = hub.entry(number, target)
                 await hub.send_to(number, target, {"type": "removed"})
@@ -905,6 +892,10 @@ async def meeting_socket(websocket: WebSocket, number: str):
     except WebSocketDisconnect:
         # Ordinary: the tab closed, or the network went away. The teardown
         # below is the whole response.
+        pass
+    except RuntimeError:
+        # An eviction closes this socket from another task, and the pending
+        # receive then raises this instead of WebSocketDisconnect.
         pass
     except Exception:
         # Anything else is a bug in the handler, and the socket is about to be

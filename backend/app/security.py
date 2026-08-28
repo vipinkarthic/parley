@@ -9,19 +9,14 @@ import jwt
 
 from .config import JWT_ALGORITHM, JWT_EXPIRE_HOURS, JWT_SECRET
 
-# A real bcrypt hash of a value nobody holds, used to spend the same time on a
-# login for an address that does not exist as on one that does. Computed once
-# at import so the cost is a verify, not a hash-plus-verify.
+# Computed once so the equaliser below costs one verify, not a hash too.
 _DUMMY_HASH = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt()).decode("utf-8")
 
 
 def spend_dummy_verify() -> None:
-    """Burn one bcrypt verification, to flatten the unknown-user login path.
+    """Flatten the unknown user login path.
 
-    Without this, `user is None` short-circuits before bcrypt ever runs and an
-    unknown address answers in ~2ms where a real one takes ~200ms - a 100x
-    signal that tells an attacker which addresses are registered, no matter how
-    carefully the error message is worded.
+    Skipping bcrypt answers 100x faster, which enumerates accounts.
     """
     bcrypt.checkpw(b"parley-timing-equaliser", _DUMMY_HASH.encode("utf-8"))
 
@@ -45,7 +40,7 @@ def hash_code(code: str) -> str:
 
 
 def codes_equal(a: str, b: str) -> bool:
-    """Compare two OTP hashes without leaking where they diverge."""
+    """Compare OTP hashes without leaking where they diverge."""
     return hmac.compare_digest(a, b)
 
 
@@ -71,11 +66,9 @@ def decode_access_token(token: str) -> int | None:
 
 
 def decode_access_token_claims(token: str) -> dict | None:
-    """Return the full verified claim set, or None if invalid/expired.
+    """Return the verified claims, or None if invalid or expired.
 
-    Separate from `decode_access_token` because the caller has to compare
-    `iat` against the user's `password_changed_at` to honour a revocation,
-    and that needs more than the subject.
+    Revocation needs iat, so the subject alone is not enough.
     """
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])

@@ -1,30 +1,17 @@
 """Regression guards for the security audit fixes.
 
-Each test here exists because the behaviour it asserts was wrong at some
-point, and in one case was fixed and then silently reintroduced: demo account
-seeding was removed in Phase 0 and added back by a later commit, so the live
-deployment shipped a published password for weeks. A passing suite did not
-notice, because nothing asserted the absence.
-
-These are the assertions that would have.
+Demo seeding was removed once and silently added back, and nothing caught it.
 """
 import time
 
 from conftest import auth_header, signup, unique_email
 
 
-# ---------------------------------------------------------------------------
-# C1 - seeded demo accounts with a published password
-# ---------------------------------------------------------------------------
+# Seeded demo accounts with a published password
 
 
 def test_demo_accounts_are_not_seeded_unless_asked_for(monkeypatch):
-    """The seeder must do nothing without an explicit opt-in.
-
-    Checked against the seeding function directly rather than through the app,
-    because the test suite deliberately turns the flag on for its own fixtures
-    and the thing under test is the default.
-    """
+    """Checked directly, since the suite turns the flag on for its fixtures."""
     from app import seed
 
     monkeypatch.setattr(seed, "SEED_DEMO_ACCOUNTS", False)
@@ -39,8 +26,7 @@ def test_demo_accounts_are_not_seeded_unless_asked_for(monkeypatch):
 
 
 def test_no_demo_password_literal_survives_in_the_source():
-    """The password was in the repository, so reading the repository was the
-    whole exploit. It must come from the environment now."""
+    """Reading the repository was the whole exploit."""
     from pathlib import Path
 
     app_dir = Path(__file__).resolve().parent.parent / "app"
@@ -50,7 +36,7 @@ def test_no_demo_password_literal_survives_in_the_source():
 
 
 def test_turning_demo_accounts_on_without_a_password_is_refused(monkeypatch):
-    """Opting in must not silently fall back to a built-in default."""
+    """Opting in must not fall back to a built in default."""
     import importlib
 
     monkeypatch.setenv("SEED_DEMO_ACCOUNTS", "true")
@@ -70,9 +56,7 @@ def test_turning_demo_accounts_on_without_a_password_is_refused(monkeypatch):
         importlib.reload(config)
 
 
-# ---------------------------------------------------------------------------
-# H2 - "remove participant" was advisory and survived a reconnect
-# ---------------------------------------------------------------------------
+# Removing a participant was advisory and survived a reconnect
 
 
 def _room(client):
@@ -95,6 +79,7 @@ def _room(client):
 
 
 def _drain_to_pong(ws, budget=12):
+    # Everything queued before the ping arrives before the pong.
     ws.send_json({"type": "ping"})
     for _ in range(budget):
         if ws.receive_json().get("type") == "pong":
@@ -102,9 +87,7 @@ def _drain_to_pong(ws, budget=12):
 
 
 def test_a_removed_participant_cannot_reconnect(client):
-    """Removal used to clear is_active and nothing else, so the row still read
-    as admitted and the ws_token still matched. The guest simply dialled back
-    in with the same credentials and was put straight back in the room."""
+    """Clearing is_active left a working token on an admitted row."""
     number, host, guest = _room(client)
 
     with client.websocket_connect(
@@ -148,14 +131,11 @@ def test_removal_invalidates_the_participant_token(client, db):
     assert row.ws_token != guest["ws_token"], "the old token still authenticates"
 
 
-# ---------------------------------------------------------------------------
-# H3 - login timing enumerated accounts
-# ---------------------------------------------------------------------------
+# Login timing enumerated accounts
 
 
 def test_login_costs_the_same_for_a_known_and_an_unknown_address(client):
-    """bcrypt only ran when the user existed, so an unknown address answered
-    in ~2ms against ~200ms - a 100x oracle that no error message could hide."""
+    """bcrypt only ran for a real account, so the gap was 100x."""
     email = unique_email("timing")
     signup(client, email)
 
@@ -172,22 +152,18 @@ def test_login_costs_the_same_for_a_known_and_an_unknown_address(client):
     known = best_of(email)
     unknown = best_of("definitely-not-registered@example.com")
 
-    # Generous: the point is that the unknown path is no longer ~100x faster.
+    # Generous, since the point is only that the gap is gone.
     assert unknown > known / 3, (
         f"unknown address answered far faster ({unknown * 1000:.0f}ms vs "
         f"{known * 1000:.0f}ms), which enumerates accounts"
     )
 
 
-# ---------------------------------------------------------------------------
-# H4 - nothing could revoke an issued token
-# ---------------------------------------------------------------------------
+# Nothing could revoke an issued token
 
 
 def test_changing_a_password_revokes_tokens_issued_before_it(client):
-    """A user who changes their password because they think they were
-    compromised did not actually lock the attacker out: the old token stayed
-    valid until it expired, which was a week."""
+    """A password change did not lock out a stolen token."""
     email = unique_email("revoke")
     token, _ = signup(client, email, password="original-pw-1234")
 
@@ -212,14 +188,11 @@ def test_changing_a_password_revokes_tokens_issued_before_it(client):
     assert client.get("/auth/me", headers=auth_header(fresh)).status_code == 200
 
 
-# ---------------------------------------------------------------------------
-# M2 / M3 - CORS and security headers
-# ---------------------------------------------------------------------------
+# CORS and security headers
 
 
 def test_an_arbitrary_vercel_origin_is_not_trusted(client):
-    """The allow-list regex was `https://.*\\.vercel\\.app`, so anyone could
-    deploy to Vercel and get an origin the API trusted with credentials."""
+    """Anyone can deploy to Vercel, so a wildcard over it trusts anyone."""
     r = client.options(
         "/api/meetings",
         headers={
@@ -246,13 +219,11 @@ def test_responses_carry_security_headers(client):
     assert r.headers["referrer-policy"] == "no-referrer"
 
 
-# ---------------------------------------------------------------------------
-# M12 - the signalling socket accepted arbitrarily large frames
-# ---------------------------------------------------------------------------
+# The signalling socket accepted arbitrarily large frames
 
 
 def test_an_oversized_signalling_message_closes_the_socket(client):
-    """uvicorn would hand up a 16 MiB frame and json.loads would parse it."""
+    """uvicorn allows 16 MiB and json.loads would parse all of it."""
     from app.ws import MAX_MESSAGE_BYTES
 
     number, host, _ = _room(client)
@@ -269,14 +240,11 @@ def test_an_oversized_signalling_message_closes_the_socket(client):
         raise AssertionError("an oversized frame was accepted")
 
 
-# ---------------------------------------------------------------------------
 # Directory privacy and the public meeting view
-# ---------------------------------------------------------------------------
 
 
 def test_the_public_meeting_view_does_not_leak_the_host_identity(client):
-    """GET /api/meetings/{n} is unauthenticated by design, and used to return
-    the host's full user record - email address and permanent PMI included."""
+    """This route is unauthenticated and returned the host's full record."""
     host_email = unique_email("host-pii")
     token, _ = signup(client, host_email)
     meeting = client.post(

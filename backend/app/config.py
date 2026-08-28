@@ -25,14 +25,7 @@ def _flag(name: str, default: str = "false") -> bool:
 
 SEED_SAMPLE_DATA = _flag("SEED_SAMPLE_DATA")
 
-# A public demo login is a deliberate product choice (a resume link that is
-# clickable without an OTP round trip), so the capability stays. What is gone
-# is the shared password that lived in this repository and was seeded on every
-# boot, production included, whether anyone asked for it or not.
-#
-# Both halves are now required and neither has a default: opt in explicitly,
-# and supply the password out of band. Anyone reading the source learns that a
-# demo *can* exist, not how to log into yours.
+# Both required, neither defaulted, so no password ships in the repository.
 SEED_DEMO_ACCOUNTS = _flag("SEED_DEMO_ACCOUNTS")
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "")
 
@@ -51,11 +44,7 @@ CORS_ORIGINS = [
     if origin.strip()
 ]
 
-# Opt-in only, and never a default. The previous value was a hardcoded
-# `https://.*\.vercel\.app`, which any Vercel tenant matches - anyone can
-# deploy a site there in minutes and get an origin the API trusts with
-# credentials. Preview deploys are a real need, so the hook stays, but the
-# pattern has to be set deliberately per environment rather than shipped.
+# Unset by default. A shipped wildcard trusted every Vercel tenant.
 CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 # A known secret means anyone can forge a token, so production refuses to boot
@@ -78,9 +67,7 @@ if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
         "production will refuse to start without a real one."
     )
 elif IS_PRODUCTION and len(JWT_SECRET) < JWT_SECRET_MIN_LENGTH:
-    # "Not the dev default" was the only bar before, so JWT_SECRET=x booted
-    # production. A short secret is brute-forceable offline from any token the
-    # holder already has, which is every logged-in user.
+    # A short secret is brute forceable offline from any issued token.
     raise RuntimeError(
         f"JWT_SECRET is only {len(JWT_SECRET)} characters. Use at least "
         f"{JWT_SECRET_MIN_LENGTH} random characters in production."
@@ -150,9 +137,7 @@ ROOM_CAP = int(os.getenv("ROOM_CAP", "10"))
 VIDEO_BUDGET = int(os.getenv("VIDEO_BUDGET", "5"))
 
 JWT_ALGORITHM = "HS256"
-# Was 168 (a week). Tokens carry no revocation list, so the expiry *is* the
-# upper bound on a stolen token's usefulness; `password_changed_at` now cuts
-# it short on demand, but the default window should not be a week either.
+# The expiry bounds how long a stolen token stays useful.
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "12"))
 
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
@@ -171,11 +156,7 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
 
 if IS_PRODUCTION and not EMAIL_ENABLED:
-    # Without a mailer the signup route falls back to handing the OTP straight
-    # back in its own HTTP response (and logging it), which turns "verify your
-    # email" into "take over any address you can spell". JWT_SECRET and
-    # DATABASE_URL already refuse to boot for the same class of reason; this
-    # belongs with them rather than being discovered in production.
+    # Without a mailer the signup route returns the OTP to the caller.
     raise RuntimeError(
         "SMTP_USER and SMTP_PASS must both be set when APP_ENV=production. "
         "Without them the signup OTP is returned in the API response, which "

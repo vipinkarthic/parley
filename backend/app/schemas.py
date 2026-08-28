@@ -3,19 +3,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-# Six characters let "123456" through, which is the first thing any list
-# tries. Eight is the floor most guidance now agrees on; length is the only
-# rule here on purpose, because composition rules push people towards
-# "Password1!" without buying much.
+# Length only, because composition rules mostly produce Password1.
 MIN_PASSWORD_LENGTH = 8
 
-# Avatars are stored inline as data: URIs rather than uploaded, so this field
-# is the upload limit. 900 KB per user, echoed to everyone who lists the
-# directory, was a payload and storage problem with no upside; 256 KB is
-# ample for the 128px avatar actually rendered.
+# Avatars are inline data URIs, so this is the upload limit. It is echoed to
+# everyone who lists the directory.
 MAX_AVATAR_URL_LENGTH = 256_000
 
-# Free text that reached the database with no ceiling at all.
+# Free text reaching the database needs a ceiling.
 MAX_DESCRIPTION_LENGTH = 2_000
 
 
@@ -33,10 +28,7 @@ class UserOut(BaseModel):
 class ContactOut(BaseModel):
     """One entry in the directory of other users.
 
-    No email address. There is no contact relationship in this product - the
-    directory is every registered user - so returning addresses handed the
-    entire user table's email to anyone who could create an account, including
-    a public demo login. Nothing in the UI ever displayed it.
+    No email, since the directory is every registered user.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -111,12 +103,9 @@ class OtpRequestResponse(BaseModel):
 
 
 class MeetingHostOut(BaseModel):
-    """The host, as shown to anyone who can see a meeting.
+    """The host, as shown to anyone holding a meeting number.
 
-    GET /api/meetings/{number} is unauthenticated by design, so whatever sits
-    here is public to anyone holding a meeting number. It used to be the full
-    UserOut, which meant the host's email address and their permanent personal
-    meeting number came with it. Only the display identity belongs here.
+    That route is unauthenticated, so only the display identity belongs here.
     """
 
     model_config = ConfigDict(from_attributes=True)

@@ -56,7 +56,26 @@ export default function MeetingRoomPage() {
   // minting a second one.
   const joinKeyRef = useRef<string>("");
 
-  const pwd = search.get("pwd") || "";
+  // The fragment is never sent to a server, and is wiped from the address
+  // bar rather than sitting in history for the whole meeting.
+  const [pwd, setPwd] = useState<string>("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const fromHash = new URLSearchParams(
+      window.location.hash.replace(/^#/, "")
+    ).get("pwd");
+    const fromQuery = search.get("pwd");
+    const found = fromHash || fromQuery || "";
+    if (found) {
+      setPwd(found);
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search.replace(/[?&]pwd=[^&]*/, "")
+      );
+    }
+  }, [search]);
 
   useEffect(() => {
     (async () => {

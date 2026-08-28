@@ -230,10 +230,7 @@ export const STUN_ONLY: IceConfig = {
 // promise, not the result, so N peers arriving at once make one request.
 let icePromise: Promise<IceConfig> | null = null;
 
-// The relay half of this response is gated server-side: a billed TURN
-// credential is not handed to anonymous callers. A signed-in user proves
-// itself with the bearer token `request` already attaches; a guest has no
-// account, so it passes the participant credentials its join returned.
+// The relay half is gated server side, so a guest passes what its join gave.
 export function fetchIceConfig(
   participantId?: number,
   wsToken?: string

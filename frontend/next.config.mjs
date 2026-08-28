@@ -1,15 +1,6 @@
 /**
- * Security headers.
- *
- * Neither tier set any before this: no CSP, no framing policy, and - because
- * an invite link can carry the meeting passcode - no Referrer-Policy either,
- * so the full URL was sent onward to any third-party origin the page touched.
- *
- * The CSP is deliberately not a bare `default-src 'self'`: Next's App Router
- * ships inline bootstrap scripts and styles, so 'unsafe-inline' is the price
- * of a policy that does not break the app. It still closes object/frame/base
- * and pins where scripts and connections may go, which is what stops an
- * injected tag from reaching an attacker's origin.
+ * Referrer-Policy matters because an invite link can carry the passcode.
+ * The CSP allows inline scripts because the App Router ships them.
  */
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const wsBase = apiBase.startsWith("https")

@@ -1,23 +1,8 @@
-"""The ICE server list the browser needs to establish a peer connection.
+"""The ICE server list the browser needs for a peer connection.
 
-Served from the API rather than compiled into the frontend so that rotating a
-TURN credential is an environment-variable change on Render, not a Vercel
-rebuild (``NEXT_PUBLIC_*`` is inlined at build time).
-
-STUN is public: it carries no credential and reveals nothing. TURN is not.
-This endpoint used to hand the relay username and password to any anonymous
-caller, reasoning that the value reaches the browser anyway - which is true of
-a *short-lived* credential and false of the static one actually configured.
-Relayed traffic is billed, so an unauthenticated endpoint that hands out a
-long-lived relay credential is an open tab on someone else's account.
-
-So TURN now requires the caller to be somebody: a signed-in user, or a
-participant holding the ws_token issued to them by a successful join. Guests
-have the latter and never have the former, which is why a bearer check alone
-would have broken exactly the people the product is for.
-
-Field names are WebRTC's camelCase, not the API's snake_case, so the response
-can be handed straight to ``new RTCPeerConnection(config)``.
+Served from the API so rotating a TURN credential needs no Vercel rebuild.
+TURN is gated because the credential is long lived and relayed traffic is
+billed. Field names are WebRTC camelCase, not the API's snake_case.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -30,11 +15,9 @@ router = APIRouter(prefix="/api", tags=["webrtc"])
 
 
 def _is_known_participant(db: Session, pid: str | None, token: str | None) -> bool:
-    """Whether pid/token name a real participant row.
+    """Whether pid and token name a real participant row.
 
-    Not scoped to a meeting on purpose: the token is the secret, it is a
-    uuid4 hex, and the caller is asking for a relay list rather than for
-    anything belonging to the meeting.
+    Not scoped to a meeting, since the token is the secret.
     """
     if not pid or not token:
         return False
@@ -59,8 +42,7 @@ def _is_known_participant(db: Session, pid: str | None, token: str | None) -> bo
 @router.get(
     "/ice",
     response_model=schemas.IceConfig,
-    # STUN entries carry no credential; omitting the nulls keeps the payload
-    # a clean RTCConfiguration rather than one with dead keys in it.
+    # Omitting the nulls keeps this a clean RTCConfiguration.
     response_model_exclude_none=True,
 )
 def ice_config(

@@ -110,9 +110,7 @@ async def lifespan(app: FastAPI):
         signal.signal(*installed)
 
 
-# The schema explorer is useful locally and is pure attack surface in
-# production - it enumerates every route, parameter and model for anyone who
-# asks. Off unless this is a development boot.
+# The explorer enumerates every route and model, so it stays out of production.
 app = FastAPI(
     title="Parley API",
     description="Backend for Parley: meetings, auth, and the WebRTC signalling hub.",
@@ -123,9 +121,7 @@ app = FastAPI(
     openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
-# `allow_origin_regex` was hardcoded to `https://.*\.vercel\.app`, which any
-# Vercel tenant satisfies - a free, instant, attacker-controlled origin that
-# the API trusted with credentials. It is env-driven now and unset by default.
+# Unset by default, since a wildcard over vercel.app trusts any tenant.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -137,10 +133,7 @@ app.add_middleware(
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
-# This is an API: it serves JSON, and nothing it returns should ever be
-# framed, sniffed into another content type, or leak its URL onward. The
-# invite link carries a passcode, which is what makes Referrer-Policy more
-# than box-ticking here.
+# A JSON API is never framed and never needs to leak its URL onward.
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -148,7 +141,7 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-site",
-    # A JSON API needs nothing at all, so the policy is "nothing at all".
+    # A JSON API loads nothing, so it may load nothing.
     "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 }
 
@@ -159,8 +152,7 @@ async def security_headers(request: Request, call_next):
     for header, value in SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
     if IS_PRODUCTION:
-        # Only in production: sending HSTS from a local http:// dev server
-        # would pin localhost to https in the browser and is a nuisance to undo.
+        # Sending this from a local http server pins localhost to https.
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )

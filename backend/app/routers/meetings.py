@@ -13,10 +13,8 @@ from ..serializers import meeting_out
 
 router = APIRouter(prefix="/api", tags=["meetings"])
 
-# Joining was the one abuse-prone route with no limiter at all, which left
-# passcode guessing and meeting-number probing entirely unthrottled. Keyed by
-# caller and by meeting, because the two attacks look different: one address
-# hammering many meetings, or many addresses hammering one.
+# Keyed both ways, because one caller hammering many meetings and many
+# callers hammering one meeting are different attacks.
 _JOIN_IP_LIMIT, _JOIN_IP_WINDOW = 30, 300
 _JOIN_MEETING_LIMIT, _JOIN_MEETING_WINDOW = 20, 300
 

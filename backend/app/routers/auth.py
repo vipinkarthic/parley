@@ -10,7 +10,11 @@ from .. import config, crud, models, ratelimit, schemas
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import utcnow
-from ..emailer import EmailSendError, send_otp_email
+from ..emailer import (
+    EmailSendError,
+    send_existing_account_notice,
+    send_otp_email,
+)
 from ..security import (
     codes_equal,
     create_access_token,
@@ -26,8 +30,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOGIN_LIMIT, _LOGIN_WINDOW = 10, 300
 _OTP_LIMIT, _OTP_WINDOW = 5, 600
-# The verify endpoint used to have no limiter, leaving only the 5-attempt
-# counter on the row - which every resend reset back to zero.
+# The row counter alone was not enough, since a resend reset it to zero.
 _VERIFY_LIMIT, _VERIFY_WINDOW = 10, 600
 
 
@@ -35,11 +38,8 @@ def _new_otp() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-# Per-address limits alone let an attacker spray one attempt each across a
-# hundred thousand different addresses without tripping anything, and let them
-# lock a chosen victim out by burning that victim's budget. The IP window is
-# the second axis: wider than the per-address one, because a shared NAT is a
-# legitimate source of many logins.
+# A second axis, so spraying across many addresses trips something. Wider
+# than the per address window because shared NAT is legitimate.
 _IP_LOGIN_LIMIT, _IP_LOGIN_WINDOW = 60, 300
 _IP_OTP_LIMIT, _IP_OTP_WINDOW = 20, 600
 
@@ -106,10 +106,13 @@ def request_signup_otp(
 ):
     _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
+
     if crud.get_user_by_email(db, data.email):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists. Please log in.",
+        # Answering differently told any caller whether the address is
+        # registered. The owner is told by email, which reaches only them.
+        background.add_task(send_existing_account_notice, data.email)
+        return schemas.OtpRequestResponse(
+            email=data.email, email_sent=config.EMAIL_ENABLED, dev_code=None
         )
 
     code = _new_otp()
@@ -140,9 +143,9 @@ def resend_signup_otp(
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No pending signup for this email. Start again.",
+        # Same shape as a real resend, so nothing distinguishes the two.
+        return schemas.OtpRequestResponse(
+            email=data.email, email_sent=config.EMAIL_ENABLED, dev_code=None
         )
     code = _new_otp()
     crud.upsert_pending_signup(
@@ -171,20 +174,14 @@ def verify_signup_otp(
     _rate_limit("verify", data.email, _VERIFY_LIMIT, _VERIFY_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
-        # A successful verify deletes the pending row, so a duplicate
-        # submission - a double-tapped button, a retried request whose first
-        # response was lost - used to come back as "start again" even though
-        # the account had just been created. The code itself cannot be
-        # re-checked (its hash went with the row), so this is not a replayed
-        # success; it is at least an honest answer about what happened.
-        if crud.get_user_by_email(db, data.email):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This email is already verified. Please log in.",
-            )
+        # One answer for both cases, since telling them apart reveals
+        # whether the address is registered.
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No pending signup found. Please start again.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "That code is not valid. If you have already verified this "
+                "email, please log in."
+            ),
         )
     if utcnow() > pending.expires_at:
         crud.delete_pending_signup(db, pending)
@@ -209,8 +206,11 @@ def verify_signup_otp(
     if crud.get_user_by_email(db, pending.email):
         crud.delete_pending_signup(db, pending)
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This email is already registered. Please log in.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "That code is not valid. If you have already verified this "
+                "email, please log in."
+            ),
         )
 
     user = crud.create_user(
@@ -234,10 +234,7 @@ def login(
     _rate_limit("login", data.email, _LOGIN_LIMIT, _LOGIN_WINDOW)
     user = crud.get_user_by_email(db, data.email)
     if user is None:
-        # Spend the same bcrypt cost the real path would, then fail. Without
-        # this the absence of a user short-circuits the verify and answers in
-        # ~2ms against ~200ms, which enumerates accounts regardless of how
-        # carefully the message below is worded.
+        # Same cost as the real path, or the timing enumerates accounts.
         spend_dummy_verify()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

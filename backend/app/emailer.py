@@ -49,6 +49,45 @@ def _build_message(to_email: str, code: str) -> EmailMessage:
     return msg
 
 
+def _build_existing_account_message(to_email: str) -> EmailMessage:
+    """How the owner of the address learns what happened."""
+    msg = EmailMessage()
+    msg["Subject"] = "You already have a Parley account"
+    msg["From"] = f"{config.SMTP_FROM_NAME} <{config.SMTP_USER}>"
+    msg["To"] = to_email
+    msg.set_content(
+        "Someone just tried to create a Parley account with this email "
+        "address, but you already have one.\n\n"
+        "If that was you, sign in instead. No new account is needed. "
+        "If it wasn't, you can safely ignore this email; nobody was told "
+        "whether this address is registered."
+    )
+    return msg
+
+
+def send_existing_account_notice(to_email: str) -> bool:
+    """Best effort. A failure must not change what signup returns."""
+    if not config.EMAIL_ENABLED:
+        logger.info("[DEV] signup attempted on an existing account: %s", to_email)
+        return False
+    try:
+        _deliver(_build_existing_account_message(to_email))
+    except Exception as exc:
+        logger.error("existing-account notice to %s failed: %s", to_email, exc)
+        return False
+    return True
+
+
+def _deliver(msg: EmailMessage) -> None:
+    context = ssl.create_default_context()
+    with smtplib.SMTP(
+        config.SMTP_HOST, config.SMTP_PORT, timeout=config.SMTP_TIMEOUT
+    ) as server:
+        server.starttls(context=context)
+        server.login(config.SMTP_USER, config.SMTP_PASS)
+        server.send_message(msg)
+
+
 def send_otp_email(to_email: str, code: str) -> bool:
     """Send the OTP.
 

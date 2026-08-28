@@ -1,13 +1,7 @@
-"""Seed the database with optional sample meetings.
+"""Seed demo accounts and optional sample meetings.
 
-Idempotent: sample meetings are seeded once, so restarting the server never
-duplicates anything.
-
-Demo accounts are opt-in (SEED_DEMO_ACCOUNTS) and take their password from the
-environment. They used to be seeded unconditionally on every boot, production
-included, with a password committed to a public repository. Note that gating
-the seeder does not delete rows an earlier boot already created; those have to
-be removed from the database directly.
+Idempotent. Demo accounts are opt in and take their password from the
+environment; gating the seeder does not remove rows already written.
 """
 from datetime import timedelta
 
@@ -26,11 +20,7 @@ DEMO_ACCOUNTS = [
 
 
 def seed_demo_accounts(db: Session) -> None:
-    """Create the demo accounts, if they do not already exist.
-
-    Only ever called when SEED_DEMO_ACCOUNTS is on, and the password comes
-    from the environment - see config.py for why both are required.
-    """
+    """Create the demo accounts, if they do not already exist."""
     for account in DEMO_ACCOUNTS:
         exists = (
             db.query(models.User).filter(models.User.email == account["email"]).first()
@@ -54,9 +44,7 @@ def seed_database(db: Session) -> None:
     if SEED_DEMO_ACCOUNTS:
         seed_demo_accounts(db)
 
-    # Sample meetings are opt-in (SEED_SAMPLE_DATA=true), hosted by whichever
-    # real account exists first. With no users there is nothing to host them,
-    # and that is the ordinary state of a fresh deployment.
+    # Hosted by whichever account exists first, so none means nothing to seed.
     if not SEED_SAMPLE_DATA:
         return
 

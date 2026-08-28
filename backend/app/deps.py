@@ -29,12 +29,9 @@ def _user_from_header(authorization: str | None, db: Session) -> models.User | N
 
 
 def _issued_before_password_change(claims: dict, user: models.User) -> bool:
-    """Whether this token predates the user's last password change.
+    """Whether this token predates the last password change.
 
-    This is the whole revocation mechanism. `iat` is a UTC timestamp and
-    `password_changed_at` may come back naive from SQLite, so it is normalised
-    before comparing; a missing `iat` is treated as unrevokable and refused
-    rather than trusted.
+    A token with no iat cannot be placed in time, so it is refused.
     """
     changed_at = getattr(user, "password_changed_at", None)
     if changed_at is None:
@@ -44,10 +41,8 @@ def _issued_before_password_change(claims: dict, user: models.User) -> bool:
         return True
     if changed_at.tzinfo is None:
         changed_at = changed_at.replace(tzinfo=timezone.utc)
-    # Both sides are compared at whole-second resolution, because that is all
-    # `iat` carries. Without the truncation a token minted microseconds after
-    # the stamp it is being checked against reads as older than itself, and
-    # every freshly issued token is refused.
+    # Whole seconds, because iat carries nothing finer and a fresh token
+    # would otherwise read as older than its own stamp.
     return int(issued_at) < int(changed_at.timestamp())
 
 

@@ -1,24 +1,12 @@
-"""Tiny in-memory rate limiter (sliding window) for abuse-prone endpoints.
+"""In memory sliding window rate limiter.
 
-Single-process, best-effort abuse protection: caps password-guessing on login,
-OTP-email spam on signup, and passcode-guessing on join. State is per-process
-and resets on restart; for a multi-instance deployment this would move to
-Redis, but it meaningfully slows brute-force / email-bombing here.
-
-Two properties that were missing and matter:
-
-* **Bounded memory.** Keys used to be created and never removed. The key
-  embeds a caller-supplied email, so an attacker submitting logins for a
-  stream of distinct addresses grew the dict until the process was killed.
-  Empty windows are now dropped, and the table has a hard ceiling.
-* **A deque, not a list.** Expiring the oldest hit was `list.pop(0)`, which
-  is O(n) in the window size.
+Single process and best effort; a multi instance deployment would need Redis.
+Bounded, because the key embeds a caller supplied email.
 """
 import time
 from collections import OrderedDict, deque
 
-# Enough for every distinct caller a single free-tier instance sees in a
-# window, and small enough that a flood of unique keys cannot exhaust memory.
+# Enough for real callers, small enough that a flood cannot exhaust memory.
 MAX_TRACKED_KEYS = 20_000
 
 _hits: "OrderedDict[str, deque[float]]" = OrderedDict()
@@ -47,11 +35,7 @@ def allow(key: str, limit: int, window_seconds: int) -> bool:
 
 
 def _evict_if_needed() -> None:
-    """Drop spent and then least-recently-used keys to stay under the ceiling.
-
-    Expired-but-present keys are the cheap win: they hold no information, and
-    an abusive scan produces them by the thousand.
-    """
+    """Spent windows go first, since an abusive scan produces thousands."""
     if len(_hits) <= MAX_TRACKED_KEYS:
         return
     for key in [k for k, v in _hits.items() if not v]:
@@ -66,13 +50,9 @@ def reset() -> None:
 
 
 def client_ip(request) -> str:
-    """Best-effort caller identity for rate limiting.
+    """Caller identity for rate limiting.
 
-    Render terminates TLS and proxies, so `request.client.host` is the proxy.
-    The left-most X-Forwarded-For entry is the original caller and is the only
-    one worth keying on - but it is caller-supplied and trivially spoofed, so
-    this is a speed bump against casual spraying, not an identity. Email-keyed
-    limits stay in place alongside it.
+    Spoofable, so it is a speed bump and the email keyed limits stay too.
     """
     forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
     if forwarded:
