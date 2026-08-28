@@ -41,11 +41,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--password-file")
+    # A connection string on the command line is visible in ps to every local
+    # user, and lands in shell history.
+    parser.add_argument("--url-file")
     args = parser.parse_args()
 
-    url = os.environ.get("DATABASE_URL", "").strip()
+    if args.url_file:
+        url = open(args.url_file).read().strip()
+    else:
+        url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
-        print("DATABASE_URL is unset. Pass the production connection string.")
+        print("No connection string. Set DATABASE_URL or pass --url-file.")
         return 2
 
     if args.password_file:
