@@ -12,6 +12,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Nothing here writes to the repository, so GITHUB_TOKEN should not be able
+# to. Without this block the token inherits the repository default, which on
+# many public repos is still read/write - a compromised action would then be
+# able to push.
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"

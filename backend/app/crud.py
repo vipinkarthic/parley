@@ -60,6 +60,8 @@ def update_profile(
 
 def change_password(db: Session, user: models.User, new_hash: str) -> None:
     user.password_hash = new_hash
+    # Same transaction as the hash, since this is what retires old tokens.
+    user.password_changed_at = models.utcnow()
     db.commit()
 
 
@@ -497,6 +499,27 @@ def get_participant_by_token(
         )
         .first()
     )
+
+
+def evict_participant(db: Session, meeting_id: str, participant_id: int) -> None:
+    """Remove a participant for good.
+
+    Clearing is_active alone left a working token on an admitted row.
+    """
+    participant = (
+        db.query(models.Participant)
+        .filter(
+            models.Participant.id == participant_id,
+            models.Participant.meeting_id == meeting_id,
+        )
+        .first()
+    )
+    if participant is None:
+        return
+    participant.admission = "removed"
+    participant.is_active = False
+    participant.ws_token = uuid.uuid4().hex
+    db.commit()
 
 
 def deactivate_participant(db: Session, meeting_id: str, participant_id: int) -> None:

@@ -3,18 +3,24 @@ import logging
 import secrets
 from datetime import timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import config, crud, models, ratelimit, schemas
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import utcnow
-from ..emailer import EmailSendError, send_otp_email
+from ..emailer import (
+    EmailSendError,
+    send_existing_account_notice,
+    send_otp_email,
+)
 from ..security import (
+    codes_equal,
     create_access_token,
     hash_code,
     hash_password,
+    spend_dummy_verify,
     verify_password,
 )
 
@@ -24,18 +30,35 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOGIN_LIMIT, _LOGIN_WINDOW = 10, 300
 _OTP_LIMIT, _OTP_WINDOW = 5, 600
+# The row counter alone was not enough, since a resend reset it to zero.
+_VERIFY_LIMIT, _VERIFY_WINDOW = 10, 600
 
 
 def _new_otp() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+# A second axis, so spraying across many addresses trips something. Wider
+# than the per address window because shared NAT is legitimate.
+_IP_LOGIN_LIMIT, _IP_LOGIN_WINDOW = 60, 300
+_IP_OTP_LIMIT, _IP_OTP_WINDOW = 20, 600
+
+
+def _too_many() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many attempts. Please wait a bit and try again.",
+    )
+
+
 def _rate_limit(kind: str, email: str, limit: int, window: int) -> None:
     if not ratelimit.allow(f"{kind}:{email.strip().lower()}", limit, window):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many attempts. Please wait a bit and try again.",
-        )
+        raise _too_many()
+
+
+def _rate_limit_ip(kind: str, request: Request, limit: int, window: int) -> None:
+    if not ratelimit.allow(f"{kind}:ip:{ratelimit.client_ip(request)}", limit, window):
+        raise _too_many()
 
 
 def _send_otp_in_background(email: str, code: str) -> None:
@@ -50,6 +73,27 @@ def _send_otp_in_background(email: str, code: str) -> None:
         send_otp_email(email, code)
     except EmailSendError as exc:
         logger.error("background OTP delivery to %s failed: %s", email, exc)
+
+
+def _dev_code(email_sent: bool, code: str) -> str | None:
+    """The code only ever rides in the response outside production."""
+    if email_sent or config.IS_PRODUCTION:
+        return None
+    return code
+
+
+def _require_mailer() -> None:
+    """Refuse signup rather than hand the code back in the response.
+
+    Only signup needs a mailer, so the rest of the service stays up.
+    """
+    if config.IS_PRODUCTION and not config.EMAIL_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Sign-ups are temporarily unavailable. Please try again later."
+            ),
+        )
 
 
 def _dispatch_otp(background: BackgroundTasks, email: str, code: str) -> bool:
@@ -78,13 +122,19 @@ def _dispatch_otp(background: BackgroundTasks, email: str, code: str) -> bool:
 def request_signup_otp(
     data: schemas.SignupRequest,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
+    _require_mailer()
+
     if crud.get_user_by_email(db, data.email):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists. Please log in.",
+        # Answering differently told any caller whether the address is
+        # registered. The owner is told by email, which reaches only them.
+        background.add_task(send_existing_account_notice, data.email)
+        return schemas.OtpRequestResponse(
+            email=data.email, email_sent=config.EMAIL_ENABLED, dev_code=None
         )
 
     code = _new_otp()
@@ -100,7 +150,7 @@ def request_signup_otp(
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
-        dev_code=None if email_sent else code,
+        dev_code=_dev_code(email_sent, code),
     )
 
 
@@ -108,14 +158,17 @@ def request_signup_otp(
 def resend_signup_otp(
     data: schemas.ResendOtpRequest,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
+    _require_mailer()
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No pending signup for this email. Start again.",
+        # Same shape as a real resend, so nothing distinguishes the two.
+        return schemas.OtpRequestResponse(
+            email=data.email, email_sent=config.EMAIL_ENABLED, dev_code=None
         )
     code = _new_otp()
     crud.upsert_pending_signup(
@@ -130,28 +183,28 @@ def resend_signup_otp(
     return schemas.OtpRequestResponse(
         email=data.email,
         email_sent=email_sent,
-        dev_code=None if email_sent else code,
+        dev_code=_dev_code(email_sent, code),
     )
 
 
 @router.post("/signup/verify", response_model=schemas.AuthResponse)
-def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_db)):
+def verify_signup_otp(
+    data: schemas.VerifyOtpRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _rate_limit_ip("verify", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
+    _rate_limit("verify", data.email, _VERIFY_LIMIT, _VERIFY_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
-        # A successful verify deletes the pending row, so a duplicate
-        # submission - a double-tapped button, a retried request whose first
-        # response was lost - used to come back as "start again" even though
-        # the account had just been created. The code itself cannot be
-        # re-checked (its hash went with the row), so this is not a replayed
-        # success; it is at least an honest answer about what happened.
-        if crud.get_user_by_email(db, data.email):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This email is already verified. Please log in.",
-            )
+        # One answer for both cases, since telling them apart reveals
+        # whether the address is registered.
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No pending signup found. Please start again.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "That code is not valid. If you have already verified this "
+                "email, please log in."
+            ),
         )
     if utcnow() > pending.expires_at:
         crud.delete_pending_signup(db, pending)
@@ -165,7 +218,7 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many incorrect attempts. Please start again.",
         )
-    if hash_code(data.code) != pending.code_hash:
+    if not codes_equal(hash_code(data.code), pending.code_hash):
         pending.attempts += 1
         db.commit()
         raise HTTPException(
@@ -176,8 +229,11 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
     if crud.get_user_by_email(db, pending.email):
         crud.delete_pending_signup(db, pending)
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This email is already registered. Please log in.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "That code is not valid. If you have already verified this "
+                "email, please log in."
+            ),
         )
 
     user = crud.create_user(
@@ -192,10 +248,22 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
 
 
 @router.post("/login", response_model=schemas.AuthResponse)
-def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(
+    data: schemas.LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _rate_limit_ip("login", request, _IP_LOGIN_LIMIT, _IP_LOGIN_WINDOW)
     _rate_limit("login", data.email, _LOGIN_LIMIT, _LOGIN_WINDOW)
     user = crud.get_user_by_email(db, data.email)
-    if user is None or not verify_password(data.password, user.password_hash):
+    if user is None:
+        # Same cost as the real path, or the timing enumerates accounts.
+        spend_dummy_verify()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+    if not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",

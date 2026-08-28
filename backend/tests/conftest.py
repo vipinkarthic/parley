@@ -27,6 +27,10 @@ sys.path.insert(0, str(BACKEND_ROOT))
 # import time, and load_dotenv() will not override a key already present.
 os.environ["APP_ENV"] = "development"
 os.environ["SEED_SAMPLE_DATA"] = "false"
+# The demo accounts are opt-in now and carry no built-in password, so the
+# suite supplies both rather than relying on the app to seed a known one.
+os.environ["SEED_DEMO_ACCOUNTS"] = "true"
+os.environ["DEMO_PASSWORD"] = "test-demo-password-not-real"
 os.environ["JWT_SECRET"] = "test-secret-not-used-anywhere-real"
 os.environ["FRONTEND_URL"] = "http://testserver.example.com"
 # Empty credentials force EMAIL_ENABLED=False, so the OTP comes back in the
@@ -207,7 +211,7 @@ def db():
 # --------------------------------------------------------------------------
 
 DEMO_EMAIL = "demo1@parley.app"
-DEMO_PASSWORD = "demo1234"
+DEMO_PASSWORD = os.environ["DEMO_PASSWORD"]
 
 _counter = {"n": 0}
 

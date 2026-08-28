@@ -128,8 +128,8 @@ def test_replay_is_refused_once_the_meeting_has_ended(client):
     assert again.status_code == 409
 
 
-def test_second_otp_verify_says_already_verified(client):
-    """Not 404 "start again" - the account exists, so say so."""
+def test_a_replayed_verify_points_at_login_without_confirming_the_account(client):
+    # Says what to do next, without confirming the address is registered.
     email = unique_email("twice")
     r = client.post(
         "/auth/signup/request-otp",
@@ -138,17 +138,24 @@ def test_second_otp_verify_says_already_verified(client):
     code = r.json()["dev_code"]
     first = client.post("/auth/signup/verify", json={"email": email, "code": code})
     assert first.status_code == 200
+
     second = client.post("/auth/signup/verify", json={"email": email, "code": code})
-    assert second.status_code == 409
+    unknown = client.post(
+        "/auth/signup/verify",
+        json={"email": unique_email("nobody"), "code": "000000"},
+    )
+
+    assert second.status_code == unknown.status_code == 400
+    assert second.json()["detail"] == unknown.json()["detail"]
     assert "log in" in second.json()["detail"].lower()
 
 
-def test_unknown_email_verify_still_says_start_again(client):
+def test_an_unknown_email_verify_is_refused(client):
     r = client.post(
         "/auth/signup/verify",
         json={"email": unique_email("nobody"), "code": "000000"},
     )
-    assert r.status_code == 404
+    assert r.status_code == 400
 
 
 def test_a_reconnecting_socket_reactivates_the_participant(client, db):

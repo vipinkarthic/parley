@@ -51,6 +51,11 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pmi: Mapped[str] = mapped_column(String(11), default="")
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    # The revocation point. Tokens carry no jti, so without this a password
+    # change could not lock out a stolen one.
+    password_changed_at: Mapped[datetime] = mapped_column(
+        UtcDateTime, default=utcnow, nullable=False
+    )
 
     pref_video_on_join: Mapped[bool] = mapped_column(Boolean, default=True)
     pref_join_muted: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -73,14 +73,26 @@ def test_signup_otp_flow_end_to_end(client):
     assert r.status_code == 200
 
 
-def test_signup_rejects_a_duplicate_email(client):
+def test_signup_does_not_reveal_that_an_email_is_registered(client):
+    # A different status for a known address answers "is this registered?"
+    # to anyone who asks.
     email = unique_email("dupe")
     signup(client, email)
-    r = client.post(
+
+    taken = client.post(
         "/auth/signup/request-otp",
         json={"name": "Someone Else", "email": email, "password": "hunter2222"},
     )
-    assert r.status_code == 409
+    fresh = client.post(
+        "/auth/signup/request-otp",
+        json={"name": "Nobody", "email": unique_email("free"), "password": "hunter2222"},
+    )
+
+    assert taken.status_code == fresh.status_code == 200
+    assert set(taken.json()) == set(fresh.json())
+    # No code for an address the caller does not own.
+    assert taken.json()["dev_code"] is None
+    assert fresh.json()["dev_code"]
 
 
 def test_signup_rejects_a_wrong_code(client):

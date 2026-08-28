@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy import inspect, text
 
-from .config import APP_ENV, CORS_ORIGINS
+from .config import APP_ENV, CORS_ORIGIN_REGEX, CORS_ORIGINS, IS_PRODUCTION
 from .database import SessionLocal, engine
 from .logging_setup import configure_logging, request_id_var
 from .routers import auth, ice, meetings, users
@@ -110,23 +110,53 @@ async def lifespan(app: FastAPI):
         signal.signal(*installed)
 
 
+# The explorer enumerates every route and model, so it stays out of production.
 app = FastAPI(
     title="Parley API",
     description="Backend for Parley: meetings, auth, and the WebRTC signalling hub.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
+# Unset by default, since a wildcard over vercel.app trusts any tenant.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
 )
 
 REQUEST_ID_HEADER = "X-Request-ID"
+
+# A JSON API is never framed and never needs to leak its URL onward.
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-site",
+    # A JSON API loads nothing, so it may load nothing.
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if IS_PRODUCTION:
+        # Sending this from a local http server pins localhost to https.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 @app.middleware("http")

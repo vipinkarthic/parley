@@ -52,12 +52,24 @@ services:
       - key: SMTP_USER
         sync: false                  # sending mailbox; required with SMTP_PASS for real email
       - key: SMTP_PASS
-        sync: false                  # Gmail App Password. Blank (or no SMTP_USER) = dev-mode OTP
+        sync: false                  # Gmail App Password, from a dedicated mailbox.
+                                     # Without it signup returns 503 rather than handing
+                                     # the code back. Nothing else needs a mailer.
       - key: DATABASE_URL
         sync: false                  # Neon POOLED string (host contains "-pooler").
                                      # Required: the app refuses to boot without it.
       - key: SEED_SAMPLE_DATA
-        value: "false"               # demo accounts always seed; sample meetings would
+        value: "false"               # sample meetings; demo accounts are separate below
+      - key: SEED_DEMO_ACCOUNTS
+        value: "false"               # demo logins are opt-in now. They used to seed on
+                                     # every boot with a password committed to the repo,
+                                     # which made it a live production credential.
+      - key: DEMO_PASSWORD
+        sync: false                  # required only if SEED_DEMO_ACCOUNTS is true. No
+                                     # default, and never in the blueprint.
+      - key: CORS_ORIGIN_REGEX
+        sync: false                  # optional, for preview deploys. Was hardcoded to
+                                     # every *.vercel.app tenant; anchor it to the project.
                                      # be seeded once against a persistent DB and then
                                      # sit at a fixed past date forever. Keep off.
       # TURN. Declared here ONLY so a blueprint sync cannot drop them: an env

@@ -19,11 +19,21 @@ IS_PRODUCTION = APP_ENV == "production"
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-SEED_SAMPLE_DATA = os.getenv("SEED_SAMPLE_DATA", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+def _flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in ("1", "true", "yes")
+
+
+SEED_SAMPLE_DATA = _flag("SEED_SAMPLE_DATA")
+
+# Both required, neither defaulted, so no password ships in the repository.
+SEED_DEMO_ACCOUNTS = _flag("SEED_DEMO_ACCOUNTS")
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "")
+
+if SEED_DEMO_ACCOUNTS and not DEMO_PASSWORD:
+    raise RuntimeError(
+        "SEED_DEMO_ACCOUNTS is on but DEMO_PASSWORD is unset. Set a password "
+        "explicitly; there is deliberately no default."
+    )
 
 CORS_ORIGINS = [
     origin.strip()
@@ -34,11 +44,16 @@ CORS_ORIGINS = [
     if origin.strip()
 ]
 
+# Unset by default. A shipped wildcard trusted every Vercel tenant.
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+
 # A known secret means anyone can forge a token, so production refuses to boot
 # without a real one rather than logging a warning nobody reads. Local dev
 # still works with no configuration at all.
 _DEV_JWT_SECRET = "dev-secret-change-me-in-production"
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+
+JWT_SECRET_MIN_LENGTH = 32
 
 if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
     if IS_PRODUCTION:
@@ -50,6 +65,12 @@ if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
     logger.warning(
         "JWT_SECRET is the built-in development default - fine locally, but "
         "production will refuse to start without a real one."
+    )
+elif IS_PRODUCTION and len(JWT_SECRET) < JWT_SECRET_MIN_LENGTH:
+    # A short secret is brute forceable offline from any issued token.
+    raise RuntimeError(
+        f"JWT_SECRET is only {len(JWT_SECRET)} characters. Use at least "
+        f"{JWT_SECRET_MIN_LENGTH} random characters in production."
     )
 
 # --- Database -------------------------------------------------------------
@@ -116,7 +137,8 @@ ROOM_CAP = int(os.getenv("ROOM_CAP", "10"))
 VIDEO_BUDGET = int(os.getenv("VIDEO_BUDGET", "5"))
 
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))
+# The expiry bounds how long a stolen token stays useful.
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "12"))
 
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
@@ -132,6 +154,14 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 # Both halves are needed to authenticate to SMTP; with only one, sending would
 # fail at delivery time instead of falling back to the dev OTP path.
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
+
+if IS_PRODUCTION and not EMAIL_ENABLED:
+    # Signup refuses rather than leaking the code. Nothing else needs a
+    # mailer, so the rest of the service stays up.
+    logger.warning(
+        "No SMTP credentials, so signup is disabled. Login, meetings and "
+        "joining are unaffected. Set SMTP_USER and SMTP_PASS to re-enable it."
+    )
 
 # --- WebRTC ICE -----------------------------------------------------------
 # STUN only tells a peer its public address; it does not carry media. Behind

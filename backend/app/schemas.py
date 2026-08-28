@@ -3,6 +3,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+# Length only, because composition rules mostly produce Password1.
+MIN_PASSWORD_LENGTH = 8
+
+# Avatars are inline data URIs, so this is the upload limit. It is echoed to
+# everyone who lists the directory.
+MAX_AVATAR_URL_LENGTH = 256_000
+
+# Free text reaching the database needs a ceiling.
+MAX_DESCRIPTION_LENGTH = 2_000
+
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -16,11 +26,15 @@ class UserOut(BaseModel):
 
 
 class ContactOut(BaseModel):
+    """One entry in the directory of other users.
+
+    No email, since the directory is every registered user.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
-    email: str
     avatar_color: str
     avatar_url: str | None = None
     status: str
@@ -29,12 +43,12 @@ class ContactOut(BaseModel):
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     avatar_color: str | None = Field(default=None, max_length=9)
-    avatar_url: str | None = Field(default=None, max_length=900_000)
+    avatar_url: str | None = Field(default=None, max_length=MAX_AVATAR_URL_LENGTH)
 
 
 class ChangePassword(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128)
-    new_password: str = Field(..., min_length=6, max_length=128)
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
 
 class PreferencesOut(BaseModel):
@@ -58,7 +72,7 @@ class PreferencesUpdate(BaseModel):
 class SignupRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
 
 class VerifyOtpRequest(BaseModel):
@@ -88,6 +102,20 @@ class OtpRequestResponse(BaseModel):
     dev_code: str | None = None
 
 
+class MeetingHostOut(BaseModel):
+    """The host, as shown to anyone holding a meeting number.
+
+    That route is unauthenticated, so only the display identity belongs here.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    avatar_color: str
+    avatar_url: str | None = None
+
+
 class ParticipantOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -102,7 +130,7 @@ class ParticipantOut(BaseModel):
 
 class ParticipantJoin(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=120)
-    passcode: str | None = None
+    passcode: str | None = Field(default=None, max_length=64)
 
 
 class ParticipantJoinOut(ParticipantOut):
@@ -119,7 +147,7 @@ class ParticipantJoinOut(ParticipantOut):
 
 class ScheduledMeetingUpdate(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
     start_time: datetime
     duration: int = Field(default=30, ge=5, le=1440)
 
@@ -163,7 +191,7 @@ class MeetingSettingsUpdate(BaseModel):
 
 class MeetingBase(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
 
 
 class InstantMeetingCreate(MeetingBase):
@@ -191,7 +219,7 @@ class MeetingOut(BaseModel):
     start_time: datetime | None
     duration: int
     created_at: datetime
-    host: UserOut
+    host: MeetingHostOut
     invite_link: str
     participant_count: int
 

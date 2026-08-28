@@ -1,11 +1,24 @@
 """Password hashing, OTP hashing, and JWT helpers."""
 import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
 
 from .config import JWT_ALGORITHM, JWT_EXPIRE_HOURS, JWT_SECRET
+
+# Computed once so the equaliser below costs one verify, not a hash too.
+_DUMMY_HASH = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt()).decode("utf-8")
+
+
+def spend_dummy_verify() -> None:
+    """Flatten the unknown user login path.
+
+    Skipping bcrypt answers 100x faster, which enumerates accounts.
+    """
+    bcrypt.checkpw(b"parley-timing-equaliser", _DUMMY_HASH.encode("utf-8"))
 
 
 def hash_password(password: str) -> str:
@@ -26,6 +39,11 @@ def hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
+def codes_equal(a: str, b: str) -> bool:
+    """Compare OTP hashes without leaking where they diverge."""
+    return hmac.compare_digest(a, b)
+
+
 def create_access_token(user_id: int) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -38,8 +56,21 @@ def create_access_token(user_id: int) -> str:
 
 def decode_access_token(token: str) -> int | None:
     """Return the user id encoded in the token, or None if invalid/expired."""
+    claims = decode_access_token_claims(token)
+    if claims is None:
+        return None
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return int(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, ValueError):
+        return int(claims["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def decode_access_token_claims(token: str) -> dict | None:
+    """Return the verified claims, or None if invalid or expired.
+
+    Revocation needs iat, so the subject alone is not enough.
+    """
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.InvalidTokenError:
         return None

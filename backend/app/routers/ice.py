@@ -1,35 +1,62 @@
-"""The ICE server list the browser needs to establish a peer connection.
+"""The ICE server list the browser needs for a peer connection.
 
-Served from the API rather than compiled into the frontend so that rotating a
-TURN credential is an environment-variable change on Render, not a Vercel
-rebuild (``NEXT_PUBLIC_*`` is inlined at build time).
-
-Unauthenticated by design: guests join meetings without an account, and the
-list ends up in the browser either way, so a gate here would cost a round trip
-and protect nothing.
-
-Field names are WebRTC's camelCase, not the API's snake_case, so the response
-can be handed straight to ``new RTCPeerConnection(config)``.
+Served from the API so rotating a TURN credential needs no Vercel rebuild.
+TURN is gated because the credential is long lived and relayed traffic is
+billed. Field names are WebRTC camelCase, not the API's snake_case.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from .. import config, schemas
+from .. import config, crud, models, schemas
+from ..database import get_db
+from ..deps import get_optional_user
 
 router = APIRouter(prefix="/api", tags=["webrtc"])
+
+
+def _is_known_participant(db: Session, pid: str | None, token: str | None) -> bool:
+    """Whether pid and token name a real participant row.
+
+    Not scoped to a meeting, since the token is the secret.
+    """
+    if not pid or not token:
+        return False
+    try:
+        participant_id = int(pid)
+    except (TypeError, ValueError):
+        return False
+    participant = (
+        db.query(models.Participant)
+        .filter(
+            models.Participant.id == participant_id,
+            models.Participant.ws_token == token,
+        )
+        .first()
+    )
+    return participant is not None and participant.admission not in (
+        "denied",
+        "removed",
+    )
 
 
 @router.get(
     "/ice",
     response_model=schemas.IceConfig,
-    # STUN entries carry no credential; omitting the nulls keeps the payload
-    # a clean RTCConfiguration rather than one with dead keys in it.
+    # Omitting the nulls keeps this a clean RTCConfiguration.
     response_model_exclude_none=True,
 )
-def ice_config():
+def ice_config(
+    pid: str | None = None,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+    viewer: models.User | None = Depends(get_optional_user),
+):
     servers: list[schemas.IceServer] = []
     if config.STUN_URLS:
         servers.append(schemas.IceServer(urls=config.STUN_URLS))
-    if config.TURN_URLS:
+
+    entitled = viewer is not None or _is_known_participant(db, pid, token)
+    if config.TURN_URLS and entitled:
         servers.append(
             schemas.IceServer(
                 urls=config.TURN_URLS,

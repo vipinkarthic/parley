@@ -36,10 +36,10 @@ def generate_passcode(length: int = 6) -> str:
 def build_invite_link(meeting_number: str, passcode: str | None = None) -> str:
     """Build an invite link, optionally carrying the passcode.
 
-    The passcode rides in the query string so link recipients do not have to
-    type it, while someone joining by meeting ID alone still must.
+    The fragment is never sent to a server. The client still reads the old
+    query form so existing links keep working.
     """
     link = f"{FRONTEND_URL}/j/{meeting_number}"
     if passcode:
-        link += f"?pwd={passcode}"
+        link += f"#pwd={passcode}"
     return link

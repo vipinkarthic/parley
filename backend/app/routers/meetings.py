@@ -1,8 +1,10 @@
 """Meeting + participant API routes."""
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from .. import crud, models, schemas
+from .. import crud, models, ratelimit, schemas
 from ..config import ROOM_CAP
 from ..database import get_db
 from ..deps import get_current_user, get_optional_user
@@ -10,6 +12,25 @@ from ..models import utcnow
 from ..serializers import meeting_out
 
 router = APIRouter(prefix="/api", tags=["meetings"])
+
+# Keyed both ways, because one caller hammering many meetings and many
+# callers hammering one meeting are different attacks.
+_JOIN_IP_LIMIT, _JOIN_IP_WINDOW = 30, 300
+_JOIN_MEETING_LIMIT, _JOIN_MEETING_WINDOW = 20, 300
+
+
+def _rate_limit_join(request: Request, meeting_number: str) -> None:
+    caller = ratelimit.client_ip(request)
+    ok = ratelimit.allow(
+        f"join:ip:{caller}", _JOIN_IP_LIMIT, _JOIN_IP_WINDOW
+    ) and ratelimit.allow(
+        f"join:meeting:{meeting_number}", _JOIN_MEETING_LIMIT, _JOIN_MEETING_WINDOW
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many join attempts. Please wait a bit and try again.",
+        )
 
 
 @router.get("/meetings/upcoming", response_model=list[schemas.MeetingOut])
@@ -188,10 +209,12 @@ def _join_out(
 def join_meeting(
     meeting_number: str,
     data: schemas.ParticipantJoin,
+    request: Request,
     db: Session = Depends(get_db),
     user: models.User | None = Depends(get_optional_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    _rate_limit_join(request, meeting_number)
     meeting = _require_meeting(db, meeting_number)
     if meeting.status == "ended":
         raise HTTPException(
@@ -213,7 +236,9 @@ def join_meeting(
             crud.reactivate_participant(db, replayed)
             return _join_out(replayed, is_meeting_host=is_owner)
 
-    if not is_owner and (data.passcode or "").strip() != meeting.passcode:
+    if not is_owner and not secrets.compare_digest(
+        (data.passcode or "").strip(), meeting.passcode or ""
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Incorrect meeting passcode.",
