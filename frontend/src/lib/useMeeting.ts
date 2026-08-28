@@ -1120,7 +1120,7 @@ export function useMeeting(opts: UseMeetingOptions) {
     // constructed - a peer connection cannot be given ICE servers after the
     // fact - so the socket waits on it. One fetch per page load, cached.
     void (async () => {
-      iceConfigRef.current = await fetchIceConfig();
+      iceConfigRef.current = await fetchIceConfig(participantId, wsToken);
       if (cancelled) return;
       connect();
     })();

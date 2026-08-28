@@ -19,11 +19,28 @@ IS_PRODUCTION = APP_ENV == "production"
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-SEED_SAMPLE_DATA = os.getenv("SEED_SAMPLE_DATA", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+def _flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in ("1", "true", "yes")
+
+
+SEED_SAMPLE_DATA = _flag("SEED_SAMPLE_DATA")
+
+# A public demo login is a deliberate product choice (a resume link that is
+# clickable without an OTP round trip), so the capability stays. What is gone
+# is the shared password that lived in this repository and was seeded on every
+# boot, production included, whether anyone asked for it or not.
+#
+# Both halves are now required and neither has a default: opt in explicitly,
+# and supply the password out of band. Anyone reading the source learns that a
+# demo *can* exist, not how to log into yours.
+SEED_DEMO_ACCOUNTS = _flag("SEED_DEMO_ACCOUNTS")
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "")
+
+if SEED_DEMO_ACCOUNTS and not DEMO_PASSWORD:
+    raise RuntimeError(
+        "SEED_DEMO_ACCOUNTS is on but DEMO_PASSWORD is unset. Set a password "
+        "explicitly; there is deliberately no default."
+    )
 
 CORS_ORIGINS = [
     origin.strip()
@@ -34,11 +51,20 @@ CORS_ORIGINS = [
     if origin.strip()
 ]
 
+# Opt-in only, and never a default. The previous value was a hardcoded
+# `https://.*\.vercel\.app`, which any Vercel tenant matches - anyone can
+# deploy a site there in minutes and get an origin the API trusts with
+# credentials. Preview deploys are a real need, so the hook stays, but the
+# pattern has to be set deliberately per environment rather than shipped.
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+
 # A known secret means anyone can forge a token, so production refuses to boot
 # without a real one rather than logging a warning nobody reads. Local dev
 # still works with no configuration at all.
 _DEV_JWT_SECRET = "dev-secret-change-me-in-production"
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+
+JWT_SECRET_MIN_LENGTH = 32
 
 if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
     if IS_PRODUCTION:
@@ -50,6 +76,14 @@ if not JWT_SECRET or JWT_SECRET == _DEV_JWT_SECRET:
     logger.warning(
         "JWT_SECRET is the built-in development default - fine locally, but "
         "production will refuse to start without a real one."
+    )
+elif IS_PRODUCTION and len(JWT_SECRET) < JWT_SECRET_MIN_LENGTH:
+    # "Not the dev default" was the only bar before, so JWT_SECRET=x booted
+    # production. A short secret is brute-forceable offline from any token the
+    # holder already has, which is every logged-in user.
+    raise RuntimeError(
+        f"JWT_SECRET is only {len(JWT_SECRET)} characters. Use at least "
+        f"{JWT_SECRET_MIN_LENGTH} random characters in production."
     )
 
 # --- Database -------------------------------------------------------------
@@ -116,7 +150,10 @@ ROOM_CAP = int(os.getenv("ROOM_CAP", "10"))
 VIDEO_BUDGET = int(os.getenv("VIDEO_BUDGET", "5"))
 
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))
+# Was 168 (a week). Tokens carry no revocation list, so the expiry *is* the
+# upper bound on a stolen token's usefulness; `password_changed_at` now cuts
+# it short on demand, but the default window should not be a week either.
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "12"))
 
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
@@ -132,6 +169,18 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 # Both halves are needed to authenticate to SMTP; with only one, sending would
 # fail at delivery time instead of falling back to the dev OTP path.
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
+
+if IS_PRODUCTION and not EMAIL_ENABLED:
+    # Without a mailer the signup route falls back to handing the OTP straight
+    # back in its own HTTP response (and logging it), which turns "verify your
+    # email" into "take over any address you can spell". JWT_SECRET and
+    # DATABASE_URL already refuse to boot for the same class of reason; this
+    # belongs with them rather than being discovered in production.
+    raise RuntimeError(
+        "SMTP_USER and SMTP_PASS must both be set when APP_ENV=production. "
+        "Without them the signup OTP is returned in the API response, which "
+        "would let anyone verify an address they do not control."
+    )
 
 # --- WebRTC ICE -----------------------------------------------------------
 # STUN only tells a peer its public address; it does not carry media. Behind

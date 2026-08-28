@@ -60,6 +60,11 @@ def update_profile(
 
 def change_password(db: Session, user: models.User, new_hash: str) -> None:
     user.password_hash = new_hash
+    # Stamped in the same transaction as the hash: this is what retires every
+    # token issued under the old password. A second of granularity is enough,
+    # but the stamp must not be earlier than the change or a token minted in
+    # the same moment would survive it.
+    user.password_changed_at = models.utcnow()
     db.commit()
 
 
@@ -497,6 +502,32 @@ def get_participant_by_token(
         )
         .first()
     )
+
+
+def evict_participant(db: Session, meeting_id: str, participant_id: int) -> None:
+    """Remove a participant for good: terminal admission, and a dead token.
+
+    `deactivate_participant` alone was not an eviction. It cleared is_active
+    and nothing else, so the row still read as admitted and its ws_token still
+    matched - and the socket handler re-activates on connect. The removed
+    participant simply dialled back in with the same credentials and was let
+    into the room. Both columns have to move, and the token has to stop
+    matching, or "remove" is only a suggestion to a cooperating client.
+    """
+    participant = (
+        db.query(models.Participant)
+        .filter(
+            models.Participant.id == participant_id,
+            models.Participant.meeting_id == meeting_id,
+        )
+        .first()
+    )
+    if participant is None:
+        return
+    participant.admission = "removed"
+    participant.is_active = False
+    participant.ws_token = uuid.uuid4().hex
+    db.commit()
 
 
 def deactivate_participant(db: Session, meeting_id: str, participant_id: int) -> None:

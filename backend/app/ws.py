@@ -36,6 +36,20 @@ WS_DENIED = 4004
 WS_MEETING_ENDED = 4005
 WS_ROOM_FULL = 4006
 WS_SUPERSEDED = 4009
+WS_TOO_MUCH = 4008
+
+# uvicorn will hand us a frame up to ws_max_size, which defaults to 16 MiB.
+# Nothing this protocol carries needs anything like that: the largest ordinary
+# message is an SDP offer, which is a few kilobytes. Everything past this is
+# either a bug or someone making the server parse megabytes on their behalf.
+MAX_MESSAGE_BYTES = 64 * 1024
+
+# A per-socket ceiling on messages. One inbound chat or state change fans out
+# to the whole room, so an unthrottled sender costs ROOM_CAP-1 sends each time.
+# High enough not to bother a real client (ICE candidates arrive in bursts),
+# low enough that a flood is refused rather than relayed.
+MAX_MESSAGES_PER_WINDOW = 240
+MESSAGE_WINDOW_SECONDS = 10.0
 
 # RFC 6455's own "Service Restart". A redeploy is the ordinary case for a free
 # Render service, and it is not an error - the client is expected to come back.
@@ -152,6 +166,12 @@ class Hub:
             if not room:
                 self.rooms.pop(number, None)
                 self.speakers.pop(number, None)
+                # Settings were written on every connect and never dropped, so
+                # the process kept one entry per meeting it had ever hosted.
+                # Only safe to discard once the lobby is empty too, since a
+                # waiting guest still reads waiting_room off it.
+                if not self.lobbies.get(number):
+                    self.settings.pop(number, None)
         ranking = self.speakers.get(number)
         if ranking is not None:
             ranking.remove(pid)
@@ -199,6 +219,8 @@ class Hub:
             entry = lobby.pop(pid)
             if not lobby:
                 self.lobbies.pop(number, None)
+                if not self.rooms.get(number):
+                    self.settings.pop(number, None)
         return entry
 
     def waiting_list(self, number: str) -> list[dict]:
@@ -398,6 +420,20 @@ async def _deactivate(meeting_id: str, pid: int) -> None:
     await run_in_threadpool(_do_deactivate, meeting_id, pid)
 
 
+def _do_evict(meeting_id: str, pid: int) -> None:
+    db = SessionLocal()
+    try:
+        crud.evict_participant(db, meeting_id, pid)
+    finally:
+        db.close()
+
+
+async def _evict(meeting_id: str, pid: int) -> None:
+    """Persisted before the socket is told, for the same reason `deny` is:
+    a reconnect re-reads admission and must not be able to undo the decision."""
+    await run_in_threadpool(_do_evict, meeting_id, pid)
+
+
 def _do_deny(meeting_id: str, pid: int) -> None:
     """Mark a guest denied and inactive in one transaction.
 
@@ -464,7 +500,7 @@ def _do_load_context(number: str, pid: int, token: str) -> dict:
         # guest still holds a valid ws_token, and `admission == "denied"` is
         # not "waiting", so a reconnect would otherwise have walked them
         # straight into the room the host just refused them.
-        if participant.admission == "denied":
+        if participant.admission in ("denied", "removed"):
             return {"close": WS_DENIED}
         if meeting.status == "ended":
             return {"close": WS_MEETING_ENDED}
@@ -622,9 +658,42 @@ async def meeting_socket(websocket: WebSocket, number: str):
             if not hub.setting(number, "waiting_room"):
                 await _admit(number, meeting_id, *_lobby_pids(number))
 
+    # Per-socket flood window. Deliberately local: it dies with the socket,
+    # so it cannot grow the way a keyed global table can.
+    window_started = time.monotonic()
+    messages_in_window = 0
+
     try:
         while True:
-            data = json.loads(await websocket.receive_text())
+            raw = await websocket.receive_text()
+
+            if len(raw) > MAX_MESSAGE_BYTES:
+                logger.warning(
+                    "oversized signalling message",
+                    extra={"meeting": number, "participant": pid, "bytes": len(raw)},
+                )
+                await _close_quietly(websocket, WS_TOO_MUCH)
+                break
+
+            now = time.monotonic()
+            if now - window_started >= MESSAGE_WINDOW_SECONDS:
+                window_started = now
+                messages_in_window = 0
+            messages_in_window += 1
+            if messages_in_window > MAX_MESSAGES_PER_WINDOW:
+                logger.warning(
+                    "signalling flood, closing socket",
+                    extra={"meeting": number, "participant": pid},
+                )
+                await _close_quietly(websocket, WS_TOO_MUCH)
+                break
+
+            try:
+                data = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(data, dict):
+                continue
             mtype = data.get("type")
 
             # Heartbeat, answered before the lobby gate because someone
@@ -766,11 +835,20 @@ async def meeting_socket(websocket: WebSocket, number: str):
                 await hub.send_to(number, int(data["target"]), {"type": "force-mute"})
             elif mtype == "remove-peer" and info["isHost"] and "target" in data:
                 target = int(data["target"])
+                # Persisted first. Telling the client and clearing is_active
+                # was the whole implementation, and neither survives a
+                # reconnect - the removed participant came straight back with
+                # the same pid and token.
+                await _evict(meeting_id, target)
+                removed = hub.entry(number, target)
                 await hub.send_to(number, target, {"type": "removed"})
                 await hub.broadcast(
                     number, {"type": "peer-left", "id": target}, exclude=target
                 )
-                await _deactivate(meeting_id, target)
+                hub.remove_room(number, target)
+                hub.remove_lobby(number, target)
+                if removed is not None:
+                    await _close_quietly(removed["ws"], WS_DENIED)
             elif mtype == "end-meeting" and info["isHost"]:
                 # Persisted first: `status == "ended"` is what stops a
                 # reconnect walking back into a meeting the host closed.

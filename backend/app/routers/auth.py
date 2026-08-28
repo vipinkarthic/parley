@@ -3,7 +3,7 @@ import logging
 import secrets
 from datetime import timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import config, crud, models, ratelimit, schemas
@@ -12,9 +12,11 @@ from ..deps import get_current_user
 from ..models import utcnow
 from ..emailer import EmailSendError, send_otp_email
 from ..security import (
+    codes_equal,
     create_access_token,
     hash_code,
     hash_password,
+    spend_dummy_verify,
     verify_password,
 )
 
@@ -24,18 +26,39 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOGIN_LIMIT, _LOGIN_WINDOW = 10, 300
 _OTP_LIMIT, _OTP_WINDOW = 5, 600
+# The verify endpoint used to have no limiter, leaving only the 5-attempt
+# counter on the row - which every resend reset back to zero.
+_VERIFY_LIMIT, _VERIFY_WINDOW = 10, 600
 
 
 def _new_otp() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+# Per-address limits alone let an attacker spray one attempt each across a
+# hundred thousand different addresses without tripping anything, and let them
+# lock a chosen victim out by burning that victim's budget. The IP window is
+# the second axis: wider than the per-address one, because a shared NAT is a
+# legitimate source of many logins.
+_IP_LOGIN_LIMIT, _IP_LOGIN_WINDOW = 60, 300
+_IP_OTP_LIMIT, _IP_OTP_WINDOW = 20, 600
+
+
+def _too_many() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many attempts. Please wait a bit and try again.",
+    )
+
+
 def _rate_limit(kind: str, email: str, limit: int, window: int) -> None:
     if not ratelimit.allow(f"{kind}:{email.strip().lower()}", limit, window):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many attempts. Please wait a bit and try again.",
-        )
+        raise _too_many()
+
+
+def _rate_limit_ip(kind: str, request: Request, limit: int, window: int) -> None:
+    if not ratelimit.allow(f"{kind}:ip:{ratelimit.client_ip(request)}", limit, window):
+        raise _too_many()
 
 
 def _send_otp_in_background(email: str, code: str) -> None:
@@ -78,8 +101,10 @@ def _dispatch_otp(background: BackgroundTasks, email: str, code: str) -> bool:
 def request_signup_otp(
     data: schemas.SignupRequest,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     if crud.get_user_by_email(db, data.email):
         raise HTTPException(
@@ -108,8 +133,10 @@ def request_signup_otp(
 def resend_signup_otp(
     data: schemas.ResendOtpRequest,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    _rate_limit_ip("otp", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
     _rate_limit("otp", data.email, _OTP_LIMIT, _OTP_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
@@ -135,7 +162,13 @@ def resend_signup_otp(
 
 
 @router.post("/signup/verify", response_model=schemas.AuthResponse)
-def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_db)):
+def verify_signup_otp(
+    data: schemas.VerifyOtpRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _rate_limit_ip("verify", request, _IP_OTP_LIMIT, _IP_OTP_WINDOW)
+    _rate_limit("verify", data.email, _VERIFY_LIMIT, _VERIFY_WINDOW)
     pending = crud.get_pending_signup(db, data.email)
     if pending is None:
         # A successful verify deletes the pending row, so a duplicate
@@ -165,7 +198,7 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many incorrect attempts. Please start again.",
         )
-    if hash_code(data.code) != pending.code_hash:
+    if not codes_equal(hash_code(data.code), pending.code_hash):
         pending.attempts += 1
         db.commit()
         raise HTTPException(
@@ -192,10 +225,25 @@ def verify_signup_otp(data: schemas.VerifyOtpRequest, db: Session = Depends(get_
 
 
 @router.post("/login", response_model=schemas.AuthResponse)
-def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(
+    data: schemas.LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _rate_limit_ip("login", request, _IP_LOGIN_LIMIT, _IP_LOGIN_WINDOW)
     _rate_limit("login", data.email, _LOGIN_LIMIT, _LOGIN_WINDOW)
     user = crud.get_user_by_email(db, data.email)
-    if user is None or not verify_password(data.password, user.password_hash):
+    if user is None:
+        # Spend the same bcrypt cost the real path would, then fail. Without
+        # this the absence of a user short-circuits the verify and answers in
+        # ~2ms against ~200ms, which enumerates accounts regardless of how
+        # carefully the message below is worded.
+        spend_dummy_verify()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+    if not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",

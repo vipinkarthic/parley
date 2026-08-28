@@ -3,6 +3,21 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+# Six characters let "123456" through, which is the first thing any list
+# tries. Eight is the floor most guidance now agrees on; length is the only
+# rule here on purpose, because composition rules push people towards
+# "Password1!" without buying much.
+MIN_PASSWORD_LENGTH = 8
+
+# Avatars are stored inline as data: URIs rather than uploaded, so this field
+# is the upload limit. 900 KB per user, echoed to everyone who lists the
+# directory, was a payload and storage problem with no upside; 256 KB is
+# ample for the 128px avatar actually rendered.
+MAX_AVATAR_URL_LENGTH = 256_000
+
+# Free text that reached the database with no ceiling at all.
+MAX_DESCRIPTION_LENGTH = 2_000
+
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -16,11 +31,18 @@ class UserOut(BaseModel):
 
 
 class ContactOut(BaseModel):
+    """One entry in the directory of other users.
+
+    No email address. There is no contact relationship in this product - the
+    directory is every registered user - so returning addresses handed the
+    entire user table's email to anyone who could create an account, including
+    a public demo login. Nothing in the UI ever displayed it.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
-    email: str
     avatar_color: str
     avatar_url: str | None = None
     status: str
@@ -29,12 +51,12 @@ class ContactOut(BaseModel):
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     avatar_color: str | None = Field(default=None, max_length=9)
-    avatar_url: str | None = Field(default=None, max_length=900_000)
+    avatar_url: str | None = Field(default=None, max_length=MAX_AVATAR_URL_LENGTH)
 
 
 class ChangePassword(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128)
-    new_password: str = Field(..., min_length=6, max_length=128)
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
 
 class PreferencesOut(BaseModel):
@@ -58,7 +80,7 @@ class PreferencesUpdate(BaseModel):
 class SignupRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
 
 class VerifyOtpRequest(BaseModel):
@@ -88,6 +110,23 @@ class OtpRequestResponse(BaseModel):
     dev_code: str | None = None
 
 
+class MeetingHostOut(BaseModel):
+    """The host, as shown to anyone who can see a meeting.
+
+    GET /api/meetings/{number} is unauthenticated by design, so whatever sits
+    here is public to anyone holding a meeting number. It used to be the full
+    UserOut, which meant the host's email address and their permanent personal
+    meeting number came with it. Only the display identity belongs here.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    avatar_color: str
+    avatar_url: str | None = None
+
+
 class ParticipantOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -102,7 +141,7 @@ class ParticipantOut(BaseModel):
 
 class ParticipantJoin(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=120)
-    passcode: str | None = None
+    passcode: str | None = Field(default=None, max_length=64)
 
 
 class ParticipantJoinOut(ParticipantOut):
@@ -119,7 +158,7 @@ class ParticipantJoinOut(ParticipantOut):
 
 class ScheduledMeetingUpdate(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
     start_time: datetime
     duration: int = Field(default=30, ge=5, le=1440)
 
@@ -163,7 +202,7 @@ class MeetingSettingsUpdate(BaseModel):
 
 class MeetingBase(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
 
 
 class InstantMeetingCreate(MeetingBase):
@@ -191,7 +230,7 @@ class MeetingOut(BaseModel):
     start_time: datetime | None
     duration: int
     created_at: datetime
-    host: UserOut
+    host: MeetingHostOut
     invite_link: str
     participant_count: int
 

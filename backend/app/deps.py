@@ -1,20 +1,54 @@
 """Shared FastAPI dependencies for authentication."""
+from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from . import crud, models
 from .database import get_db
-from .security import decode_access_token
+from .security import decode_access_token_claims
 
 
 def _user_from_header(authorization: str | None, db: Session) -> models.User | None:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     token = authorization.split(" ", 1)[1].strip()
-    user_id = decode_access_token(token)
-    if user_id is None:
+    claims = decode_access_token_claims(token)
+    if claims is None:
         return None
-    return crud.get_user_by_id(db, user_id)
+    try:
+        user_id = int(claims["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    user = crud.get_user_by_id(db, user_id)
+    if user is None:
+        return None
+    if _issued_before_password_change(claims, user):
+        return None
+    return user
+
+
+def _issued_before_password_change(claims: dict, user: models.User) -> bool:
+    """Whether this token predates the user's last password change.
+
+    This is the whole revocation mechanism. `iat` is a UTC timestamp and
+    `password_changed_at` may come back naive from SQLite, so it is normalised
+    before comparing; a missing `iat` is treated as unrevokable and refused
+    rather than trusted.
+    """
+    changed_at = getattr(user, "password_changed_at", None)
+    if changed_at is None:
+        return False
+    issued_at = claims.get("iat")
+    if issued_at is None:
+        return True
+    if changed_at.tzinfo is None:
+        changed_at = changed_at.replace(tzinfo=timezone.utc)
+    # Both sides are compared at whole-second resolution, because that is all
+    # `iat` carries. Without the truncation a token minted microseconds after
+    # the stamp it is being checked against reads as older than itself, and
+    # every freshly issued token is refused.
+    return int(issued_at) < int(changed_at.timestamp())
 
 
 def get_current_user(

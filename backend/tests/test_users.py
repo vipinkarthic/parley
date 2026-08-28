@@ -58,8 +58,21 @@ def test_a_contact_carries_presence_and_no_credentials(client):
     assert contacts, "the demo seed should leave somebody to list"
 
     entry = contacts[0]
-    assert set(entry) == {"id", "name", "email", "avatar_color", "avatar_url", "status"}
+    assert set(entry) == {"id", "name", "avatar_color", "avatar_url", "status"}
     assert entry["status"] in {"available", "in-meeting"}
+
+
+def test_the_directory_does_not_hand_out_email_addresses(client):
+    """The directory is every registered user, so an address here is every
+    user's address. Anyone who can sign up could otherwise scrape the lot."""
+    token, _ = signup(client, unique_email("contact-privacy"))
+    other_email = unique_email("contact-private")
+    signup(client, other_email)
+
+    body = client.get("/api/contacts", headers=auth_header(token)).text
+    assert other_email not in body
+    for entry in client.get("/api/contacts", headers=auth_header(token)).json():
+        assert "email" not in entry
 
 
 def test_a_user_in_a_live_meeting_reads_as_in_meeting(client):

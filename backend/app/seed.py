@@ -1,20 +1,23 @@
-"""Seed the database with demo accounts (and optional sample meetings).
+"""Seed the database with optional sample meetings.
 
-Idempotent: demo accounts are created only if missing, and sample meetings are
-seeded once, so restarting the server never duplicates anything.
+Idempotent: sample meetings are seeded once, so restarting the server never
+duplicates anything.
+
+Demo accounts are opt-in (SEED_DEMO_ACCOUNTS) and take their password from the
+environment. They used to be seeded unconditionally on every boot, production
+included, with a password committed to a public repository. Note that gating
+the seeder does not delete rows an earlier boot already created; those have to
+be removed from the database directly.
 """
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from . import crud, models, utils
-from .config import SEED_SAMPLE_DATA
+from .config import DEMO_PASSWORD, SEED_DEMO_ACCOUNTS, SEED_SAMPLE_DATA
 from .models import utcnow
 from .security import hash_password
 
-# Ready-to-use demo logins so the app can be tested without going through the
-# email OTP flow. All share the same password.
-DEMO_PASSWORD = "demo1234"
 DEMO_ACCOUNTS = [
     {"name": "Demo One", "email": "demo1@parley.app", "color": "#0E7C74"},
     {"name": "Demo Two", "email": "demo2@parley.app", "color": "#12B76A"},
@@ -25,8 +28,8 @@ DEMO_ACCOUNTS = [
 def seed_demo_accounts(db: Session) -> None:
     """Create the demo accounts, if they do not already exist.
 
-    They are created verified, so they can log in without going through the
-    email OTP flow.
+    Only ever called when SEED_DEMO_ACCOUNTS is on, and the password comes
+    from the environment - see config.py for why both are required.
     """
     for account in DEMO_ACCOUNTS:
         exists = (
@@ -48,10 +51,12 @@ def seed_demo_accounts(db: Session) -> None:
 
 
 def seed_database(db: Session) -> None:
-    seed_demo_accounts(db)
+    if SEED_DEMO_ACCOUNTS:
+        seed_demo_accounts(db)
 
-    # Sample meetings are opt-in (SEED_SAMPLE_DATA=true), hosted by the first
-    # demo account.
+    # Sample meetings are opt-in (SEED_SAMPLE_DATA=true), hosted by whichever
+    # real account exists first. With no users there is nothing to host them,
+    # and that is the ordinary state of a fresh deployment.
     if not SEED_SAMPLE_DATA:
         return
 

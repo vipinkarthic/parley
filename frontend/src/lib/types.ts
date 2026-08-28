@@ -61,7 +61,6 @@ export interface WaitingPerson {
 export interface Contact {
   id: number;
   name: string;
-  email: string;
   avatar_color: string;
   avatar_url: string | null;
   status: "available" | "in-meeting";

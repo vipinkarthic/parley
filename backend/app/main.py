@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy import inspect, text
 
-from .config import APP_ENV, CORS_ORIGINS
+from .config import APP_ENV, CORS_ORIGIN_REGEX, CORS_ORIGINS, IS_PRODUCTION
 from .database import SessionLocal, engine
 from .logging_setup import configure_logging, request_id_var
 from .routers import auth, ice, meetings, users
@@ -110,23 +110,61 @@ async def lifespan(app: FastAPI):
         signal.signal(*installed)
 
 
+# The schema explorer is useful locally and is pure attack surface in
+# production - it enumerates every route, parameter and model for anyone who
+# asks. Off unless this is a development boot.
 app = FastAPI(
     title="Parley API",
     description="Backend for Parley: meetings, auth, and the WebRTC signalling hub.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
+# `allow_origin_regex` was hardcoded to `https://.*\.vercel\.app`, which any
+# Vercel tenant satisfies - a free, instant, attacker-controlled origin that
+# the API trusted with credentials. It is env-driven now and unset by default.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
 )
 
 REQUEST_ID_HEADER = "X-Request-ID"
+
+# This is an API: it serves JSON, and nothing it returns should ever be
+# framed, sniffed into another content type, or leak its URL onward. The
+# invite link carries a passcode, which is what makes Referrer-Policy more
+# than box-ticking here.
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-site",
+    # A JSON API needs nothing at all, so the policy is "nothing at all".
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if IS_PRODUCTION:
+        # Only in production: sending HSTS from a local http:// dev server
+        # would pin localhost to https in the browser and is a nuisance to undo.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 @app.middleware("http")
