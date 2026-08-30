@@ -56,6 +56,23 @@ def test_a_send_posts_the_code_to_the_mail_api(monkeypatch):
     assert captured["timeout"] == config.EMAIL_TIMEOUT
 
 
+def test_the_request_names_itself(monkeypatch):
+    """Without a User-Agent this never reaches the API.
+
+    Cloudflare fronts it and bans urllib's default agent, answering 403
+    "error code: 1010". The send fails in a way that looks like a rejected
+    key, so the header is load bearing rather than cosmetic.
+    """
+    captured = {}
+    _use_resend(monkeypatch, capture=captured)
+
+    send_otp_email("someone@example.com", "123456")
+
+    agent = captured["request"].get_header("User-agent")
+    assert agent, "no User-Agent set"
+    assert "urllib" not in agent.lower(), agent
+
+
 def test_the_payload_carries_both_bodies_and_the_configured_sender(monkeypatch):
     import json
 

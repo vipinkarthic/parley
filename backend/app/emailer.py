@@ -116,6 +116,10 @@ def _deliver_via_resend(msg: EmailMessage) -> None:
         headers={
             "Authorization": f"Bearer {config.RESEND_API_KEY}",
             "Content-Type": "application/json",
+            # Cloudflare fronts the API and bans urllib's default agent
+            # outright, answering 403 "error code: 1010" before the request
+            # reaches Resend at all. Any real name gets through.
+            "User-Agent": "parley",
         },
         method="POST",
     )
