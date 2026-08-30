@@ -2,7 +2,7 @@
 
 A video meeting application: instant or scheduled meetings, joined by meeting ID
 or invite link, with camera, mic, chat, reactions, screen share, a waiting room
-and host controls. Media is peer-to-peer WebRTC; the server relays signalling and
+and host controls. Media is peer-to-peer WebRTC. The server relays signalling and
 application events and never touches media.
 
 ![Dashboard](docs/screenshots/dashboard.png)
@@ -23,18 +23,15 @@ Other screens: [in a meeting](docs/screenshots/meeting.png),
 | Auth      | JWT (PyJWT), bcrypt password hashing, email OTP over SMTP |
 
 Outside the core stack the backend uses only PyJWT, bcrypt and python-dotenv, and
-the frontend nothing beyond React and Next; the API client uses `fetch`.
+the frontend nothing beyond React and Next. The API client uses `fetch`.
 
 ## What it does
 
-- Dashboard with search, settings, profile menu, and Upcoming and Recent lists.
 - Instant meetings generate an 11-digit meeting ID and an invite link. Scheduled
-  ones take a topic, description, start time and duration, and show non-hosts a
-  countdown until the host starts.
+  ones take a topic, start time and duration, and show non-hosts a countdown.
 - Join by meeting ID or invite link, behind a prejoin screen with device preview.
 - Email and password login, OTP-verified signup, stateless JWT bearer sessions.
-- Invite links work without an account. Guest names get a `(Guest)` suffix, and
-  guests are exempt from the one-active-meeting rule.
+  Invite links work without an account, and guest names get a `(Guest)` suffix.
 - The room carries presence, mic and camera toggles, chat, reactions, raise-hand,
   speaker and gallery views with pin, active-speaker highlight, rename and a timer.
 - Screen share sends camera and screen together, screen large with a filmstrip.
@@ -43,10 +40,6 @@ the frontend nothing beyond React and Next; the API client uses `fetch`.
   mute or remove, spotlight, lower hand, ask to unmute, and end for all.
 - Passcodes ride in invite links, are required for ID-only joins, bypassed by the
   host, and never exposed to non-hosts.
-- New Meeting reuses an existing active instant room, and a signed-in account
-  cannot be in two meetings at once.
-- Profile settings cover display name, avatar colour and photo, Personal Meeting
-  ID, password change, and preferences that set prejoin defaults.
 
 ## Architecture
 
@@ -60,28 +53,6 @@ Browser A <-------- 3. WebRTC audio and video, direct -------> Browser B
     +---- 2. WSS (signalling) ---> WS hub ---> DB <-----------------+
 ```
 
-The hub is `backend/app/ws.py` and active-speaker ranking is
-`backend/app/speakers.py`. Scripts under `backend/tools/` are operational and
-none are imported by the app.
-
-### Join flow
-
-1. `POST /api/meetings/{number}/join`, guests permitted so invite links work.
-   The server derives `is_host` and `admission` from the database, not from
-   client input, writes a `participants` row, and returns a participant id and
-   a per-participant `ws_token`.
-2. `WS /ws/meetings/{number}?pid=...&token=...`. The hub re-reads the meeting
-   and participant from the database and closes with code `4003` if the token
-   does not match. This is the only grant of host privileges on the socket.
-3. Admitted peers get a `peers` snapshot and the room gets `peer-joined`. Waiting
-   peers are held in a lobby and hosts get `waiting-list`.
-4. Peers exchange `offer`, `answer` and `ice` messages addressed with a `to` field.
-   The hub relays them verbatim and never parses or terminates media.
-5. One `RTCPeerConnection` per pair carries audio and video. Chat, reactions,
-   raise-hand, screen-share state and host controls share the same WebSocket.
-
-### Scaling properties
-
 | Plane | State | Scaling |
 | --- | --- | --- |
 | HTTP API | Stateless (JWT, no server sessions) | Horizontal; database connection count is the ceiling |
@@ -91,114 +62,58 @@ none are imported by the app.
 Each peer encodes and uploads N-1 copies of its own video, so client cost grows
 with the square of room size while the server stays idle. See [Limits](#limits).
 
-## Database schema
+Joining goes: `POST /api/meetings/{number}/join` with guests permitted, where the
+server derives `is_host` and `admission` from the database rather than from client
+input and returns a per-participant `ws_token`. Then
+`WS /ws/meetings/{number}?pid=...&token=...`, where the hub re-reads both rows and
+closes with code `4003` if the token does not match. That check is the only grant
+of host privileges on the socket. Admitted peers get a `peers` snapshot, waiting
+peers are held in a lobby, and the hub relays `offer`, `answer` and `ice` verbatim
+without parsing or terminating media. Chat, reactions, raise-hand, screen-share
+state and host controls share the same socket.
 
-PostgreSQL, four tables, managed by Alembic. All timestamp columns are
-`timestamptz` and all values are written in UTC. Indexes cover
-`participants.meeting_id`, `meetings.host_id`, `meetings.start_time`, and the
-unique `meetings.meeting_number` and `users.email`.
+The hub is `backend/app/ws.py`, active-speaker ranking is
+`backend/app/speakers.py`, and the data model is `backend/app/models.py`: four
+tables, `users`, `meetings`, `participants` and `pending_signups`, with Alembic
+owning the schema.
 
-`users`, created only after OTP verification:
-
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | int PK | |
-| `name` | str(120) | |
-| `email` | str(200) | unique |
-| `password_hash` | str(200) | bcrypt |
-| `is_verified` | bool | set once the email OTP is confirmed |
-| `avatar_color` | str(9) | hex colour for the initials avatar |
-| `avatar_url` | text, null | uploaded photo as a data URL |
-| `pmi` | str(11) | Personal Meeting ID, a permanent room |
-| `created_at` | datetime | |
-| `pref_video_on_join`, `pref_join_muted`, `pref_mirror_video`, `pref_hd_video`, `pref_notifications` | bool | prejoin defaults |
-
-`meetings`:
-
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | str(36) PK | uuid4 hex |
-| `meeting_number` | str(11) | unique, indexed |
-| `topic` | str(200) | |
-| `description` | text, null | |
-| `passcode` | str(10) | required to join; host bypasses |
-| `host_id` | FK users | |
-| `meeting_type` | str(20) | `instant` or `scheduled` |
-| `status` | str(20) | `scheduled`, `active` or `ended` |
-| `waiting_room`, `locked`, `mute_on_entry`, `join_before_host` | bool | host settings |
-| `allow_screen_share`, `allow_unmute`, `allow_video`, `allow_rename`, `allow_chat`, `allow_reactions` | bool | non-host permissions; host bypasses |
-| `start_time` | datetime, null | scheduled meetings only |
-| `duration` | int | minutes |
-| `created_at` | datetime | |
-
-`participants`, with `ON DELETE CASCADE`:
-
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | int PK | |
-| `meeting_id` | FK meetings | cascade delete |
-| `user_id` | FK users, null | null means anonymous guest |
-| `display_name` | str(120) | guests get a `(Guest)` suffix |
-| `is_host` | bool | decided server-side, never trusted from the client |
-| `is_muted`, `is_video_on` | bool | |
-| `is_active` | bool | false means left or removed |
-| `admission` | str(12) | `admitted`, `waiting` or `denied` |
-| `ws_token` | str(40) | per-participant secret required by the WebSocket |
-| `joined_at` | datetime | |
-
-`pending_signups` holds an unverified signup: name, bcrypt password hash,
-SHA-256 hashed OTP (`code_hash`), `expires_at` and an `attempts` counter. On
-verification it becomes a `users` row and is deleted.
-
-## Local setup
+## Running it locally
 
 Requires Node.js 18+ and Python 3.12. `render.yaml` pins 3.12.6; 3.10+ runs.
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # development OTP works with no further edits
-alembic upgrade head               # point DATABASE_URL at Postgres first
+cp .env.example .env                                 # development OTP needs no edits
+alembic upgrade head                                 # point DATABASE_URL at Postgres first
 uvicorn app.main:app --reload --port 8000
-```
 
-The API serves on `http://localhost:8000`, with interactive docs at `/docs`.
-
-Alembic owns the schema. The app verifies its tables exist at startup and refuses
-to boot otherwise, so a failed migration cannot leave a half-built database.
-
-| Command | Purpose |
-| --- | --- |
-| `alembic upgrade head` | Apply migrations |
-| `alembic current` | Show the applied revision |
-| `alembic check` | Verify models and migrations agree |
-| `alembic downgrade base` | Roll back to an empty database (destroys data) |
-
-Leaving `DATABASE_URL` unset falls back to local SQLite so the tests run offline.
-Production refuses to start without a real `DATABASE_URL`.
-
-```bash
 cd frontend
 npm install
-cp .env.example .env.local         # already points at http://localhost:8000
+cp .env.example .env.local                           # already points at localhost:8000
 npm run dev
 ```
 
-Open `http://localhost:3000`. For a multi-peer meeting, start one in a window and
-open the invite link in a second incognito window as a guest. If camera or
-microphone permission is denied, the room falls back to an avatar tile.
+Open `http://localhost:3000`. The API serves on `http://localhost:8000` with
+interactive docs at `/docs`, which is the reference for every endpoint. All
+`/api/*` routes need a bearer token except `GET /api/meetings/{number}` and
+`POST /api/meetings/{number}/join`, which permit guests so invite links work.
+In-meeting participant controls run over the WebSocket, not REST.
 
-Demo logins are opt in. Set `SEED_DEMO_ACCOUNTS=true` and a `DEMO_PASSWORD` to
-seed `demo1@parley.app`, `demo2@parley.app` and `demo3@parley.app`, which skip the
-OTP flow. `DEMO_PASSWORD` has no default and the app refuses to boot if the flag is
-set without it. `SEED_SAMPLE_DATA=true` seeds sample meetings. With no `SMTP_USER`
-or `SMTP_PASS` the signup code appears in the UI and the backend console; in
-production that path is refused and signup returns 503.
+Every setting is documented in `backend/.env.example`. The ones that change
+behaviour most are `DATABASE_URL`, `JWT_SECRET`, `SMTP_USER` with `SMTP_PASS`,
+`ROOM_CAP` and `VIDEO_BUDGET`.
 
-### Tests
+Alembic owns the schema. The app verifies its tables exist at startup and refuses
+to boot otherwise, so a failed migration cannot leave a half-built database. Use
+`alembic upgrade head` to apply, `alembic current` to inspect, and `alembic check`
+to confirm models and migrations agree. Leaving `DATABASE_URL` unset falls back to
+local SQLite so the tests run offline; production refuses to start without it.
+
+For a multi-peer meeting, start one in a window and open the invite link in a
+second incognito window as a guest. Demo logins are opt in: set
+`SEED_DEMO_ACCOUNTS=true` and a `DEMO_PASSWORD`, which has no default.
 
 ```bash
 cd backend && pip install -r requirements-dev.txt
@@ -219,96 +134,6 @@ the frontend type-check and lint on every pull request:
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Coverage notes:
 [`docs/TESTING.md`](docs/TESTING.md).
 
-## Environment variables
-
-Backend, in `backend/.env`:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `APP_ENV` | `development` (`production` when `RENDER` is set) | Production requires a real `JWT_SECRET` and `DATABASE_URL` |
-| `DATABASE_URL` | SQLite file locally; required in production | Postgres connection string; use Neon's pooled endpoint |
-| `DB_POOL_SIZE` | `5` | SQLAlchemy pool size |
-| `DB_MAX_OVERFLOW` | `5` | Connections above the pool size |
-| `DB_POOL_RECYCLE` | `280` | Recycle before Neon's idle timeout |
-| `FRONTEND_URL` | `http://localhost:3000` | Used to build invite links |
-| `CORS_ORIGINS` | `http://localhost:3000,...` | Allowed CORS origins |
-| `SEED_SAMPLE_DATA` | `false` | Seed sample meetings for the first user |
-| `SEED_DEMO_ACCOUNTS` | `false` | Seed the three demo logins, which skip OTP |
-| `DEMO_PASSWORD` | empty | Required when `SEED_DEMO_ACCOUNTS` is on; no default |
-| `CORS_ORIGIN_REGEX` | unset | Optional regex for preview deployments; anchor it to your own project |
-| `JWT_SECRET` | dev default locally; required in production | JWT signing secret, at least 32 characters in production |
-| `JWT_EXPIRE_HOURS` | `12` | Token lifetime. A password change retires tokens issued before it |
-| `SMTP_HOST` | `smtp.gmail.com` | SMTP server for OTP email |
-| `SMTP_PORT` | `587` | SMTP port (STARTTLS) |
-| `SMTP_USER` | empty | Sending mailbox |
-| `SMTP_PASS` | empty | SMTP password, or a Gmail app password |
-| `SMTP_FROM_NAME` | `Parley` | Display name on OTP email |
-| `SMTP_TIMEOUT` | `15` | SMTP socket timeout in seconds |
-| `OTP_TTL_MINUTES` | `10` | OTP validity window |
-| `OTP_MAX_ATTEMPTS` | `5` | Wrong codes before the pending signup is discarded |
-| `ROOM_CAP` | `10` | Participant cap, enforced on the join endpoint and the socket |
-| `VIDEO_BUDGET` | `5` | Remote cameras a client subscribes to at once |
-| `STUN_URLS` | two Google STUN servers | Comma-separated, served by `GET /api/ice` |
-| `TURN_URLS` | Open Relay (`:80`, `:443`, `turns:`) | Comma-separated TURN URLs |
-| `TURN_USERNAME` | `openrelayproject` | Replace for a dedicated account |
-| `TURN_CREDENTIAL` | `openrelayproject` | Replace for a dedicated account |
-| `ICE_CANDIDATE_POOL_SIZE` | `2` | Candidates pre-gathered per peer connection |
-| `LOG_FORMAT` | `json` in production, else `text` | `json` emits one object per line |
-| `LOG_LEVEL` | `INFO` | Root log level |
-
-Frontend, in `frontend/.env.local`: `NEXT_PUBLIC_API_BASE`, default
-`http://localhost:8000`.
-
-Real email requires both `SMTP_USER` and `SMTP_PASS`. With either missing the
-app stays in development OTP mode instead of failing at send time. For Gmail,
-`SMTP_PASS` is an app password from Google Account, Security, 2-Step
-Verification, App Passwords.
-
-The TURN defaults point at Open Relay's public endpoint. It is verified
-non-functional, described under [Limits](#limits), and the backend warns at
-boot. These are not secrets: the ICE list is served to the browser by design.
-
-## API reference
-
-Base URL `http://localhost:8000`, interactive docs at `/docs`. All `/api/*`
-routes require a bearer token except `GET /api/meetings/{number}` and
-`POST /api/meetings/{number}/join`, which permit guests. In-meeting participant
-controls run over the authenticated WebSocket, not REST.
-
-Every response carries an `X-Request-ID`, echoing an inbound one if present.
-`POST /api/meetings/{number}/join` accepts an `Idempotency-Key` header:
-replaying a key returns the participant created by the first call.
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `GET` | `/` | Liveness; the deployed health check target |
-| `GET` | `/healthz` | Liveness; never touches the database |
-| `GET` | `/readyz` | Readiness including a database probe; 503 if down |
-| `GET` | `/api/ice` | STUN is public. TURN needs a signed-in user or a valid participant `pid` and `token` |
-| `POST` | `/auth/signup/request-otp` | Start signup and email a 6-digit OTP |
-| `POST` | `/auth/signup/resend-otp` | Resend the signup OTP |
-| `POST` | `/auth/signup/verify` | Verify the OTP, create the account, return a token |
-| `POST` | `/auth/login` | Email and password login |
-| `GET` | `/auth/me` | Current authenticated user |
-| `POST` | `/auth/change-password` | Change password |
-| `GET` | `/api/meetings/upcoming` | Scheduled, not-yet-ended meetings |
-| `GET` | `/api/meetings/recent` | Past meetings |
-| `GET` | `/api/meetings` | All your meetings |
-| `POST` | `/api/meetings/instant` | Create or reuse your instant meeting |
-| `POST` | `/api/meetings/personal` | Your Personal Meeting Room |
-| `POST` | `/api/meetings/schedule` | Create a scheduled meeting |
-| `GET` | `/api/meetings/{number}` | Validate or fetch a meeting (guest-visible) |
-| `PATCH` | `/api/meetings/{number}` | Edit a scheduled meeting (host) |
-| `DELETE` | `/api/meetings/{number}` | Delete a meeting (host) |
-| `PATCH` | `/api/meetings/{number}/settings` | Update host settings (host) |
-| `POST` | `/api/meetings/{number}/end` | End a meeting (host) |
-| `POST` | `/api/meetings/{number}/join` | Join; guests allowed, honours `Idempotency-Key` |
-| `GET` | `/api/contacts` | Registered users, without email addresses |
-| `PATCH` | `/api/profile` | Update name, avatar colour or photo |
-| `GET` | `/api/preferences` | Read preferences |
-| `PATCH` | `/api/preferences` | Update preferences |
-| `WS` | `/ws/meetings/{number}` | Signalling, presence, chat, reactions, host controls |
-
 ## Limits
 
 ### Room size
@@ -318,14 +143,14 @@ Raising the ceiling properly requires an SFU. Two mitigations ship.
 
 Active-speaker paging: each client subscribes to the top 5 by rank plus anyone
 pinned, spotlighted or screensharing, and asks the rest to stop sending video.
-Senders comply with `replaceTrack(null)`, which needs no renegotiation. Ranking
-is server-side with hysteresis so all clients derive the same set. A sender only
+Senders comply with `replaceTrack(null)`, which needs no renegotiation. Ranking is
+server-side with hysteresis so all clients derive the same set. A sender only
 saves uplink once every receiver has dropped it, so one pin keeps one encode alive.
 
-Encoder caps: `maxBitrate`, `scaleResolutionDownBy` and `maxFramerate` step down
-as receiver count grows, from 1.2 Mbps at full resolution and 30 fps with one
-receiver to 200 kbps at a third resolution and half framerate past six. H.264 is
-preferred so hardware encoders can be used.
+Encoder caps: `maxBitrate`, `scaleResolutionDownBy` and `maxFramerate` step down as
+receiver count grows, from 1.2 Mbps at full resolution and 30 fps with one receiver
+to 200 kbps at a third resolution and half framerate past six. H.264 is preferred
+so hardware encoders can be used.
 
 `ROOM_CAP` is 10, enforced on the join endpoint and the WebSocket. Ramped 2 to 12
 headless Chrome peers on a 20-core i7-12700H, via `backend/tools/loadtest.py`:
@@ -349,11 +174,11 @@ streams report `bandwidth`. The cap is 10 because ten is the last rung with
 headroom on both binding constraints, 83% of one core against 98% and no stream at
 a bandwidth limit. Video at the cap is roughly 180p.
 
-All clients select the same top-K from the same ranking, so load concentrates and
-a sender's cost depends on how often they are ranked. Every peer in this harness
-runs on one machine: bitrate transfers directly, CPU does not, since a real
-participant pays for one encode set and N-1 decodes while the test machine pays
-for all N of both. Treat CPU as an upper bound.
+All clients select the same top-K from the same ranking, so load concentrates and a
+sender's cost depends on how often they are ranked. Every peer in this harness runs
+on one machine: bitrate transfers directly, CPU does not, since a real participant
+pays for one encode set and N-1 decodes while the test machine pays for all N of
+both. Treat CPU as an upper bound.
 
 ### Other limits
 
@@ -401,14 +226,12 @@ to 0.50 ms.
 
 ### Reproducing the measurements
 
-The ramp launches up to N headless Chrome instances with synthetic cameras and
-will saturate the machine it runs on.
+The ramp launches up to N headless Chrome instances with synthetic cameras and will
+saturate the machine it runs on.
 
 ```bash
-# with the backend and frontend running locally
-cd backend
-python tools/loadtest.py --web http://127.0.0.1:3000 \
-                        --api http://127.0.0.1:8000 \
+cd backend    # with the backend and frontend running locally
+python tools/loadtest.py --web http://127.0.0.1:3000 --api http://127.0.0.1:8000 \
                         --ramp 2,4,6,8,10,12 --hold 20 --json ramp.json
 ```
 
