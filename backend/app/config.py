@@ -151,16 +151,43 @@ SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Parley")
 SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15"))
 
-# Both halves are needed to authenticate to SMTP; with only one, sending would
-# fail at delivery time instead of falling back to the dev OTP path.
-EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
+# An HTTPS mail API, because most PaaS hosts block outbound SMTP. Render does:
+# ports 25, 465 and 587 are refused, so smtplib fails with ENETUNREACH before
+# it ever authenticates, and no Gmail App Password can change that. Port 443
+# is open, so the API path works where SMTP cannot.
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+RESEND_ENDPOINT = os.getenv("RESEND_ENDPOINT", "https://api.resend.com/emails")
+# Resend's shared sender works with no domain verification, which makes the
+# first send possible before DNS is set up. Point it at your own domain after.
+EMAIL_FROM = os.getenv("EMAIL_FROM", "Parley <onboarding@resend.dev>").strip()
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
+
+# Which transport actually sends. The API wins when both are configured,
+# because a host that blocks SMTP is the case this exists for.
+if RESEND_API_KEY:
+    EMAIL_TRANSPORT = "resend"
+elif SMTP_USER and SMTP_PASS:
+    # Both halves are needed to authenticate; with only one, sending would
+    # fail at delivery time instead of falling back to the dev OTP path.
+    EMAIL_TRANSPORT = "smtp"
+else:
+    EMAIL_TRANSPORT = "none"
+
+EMAIL_ENABLED = EMAIL_TRANSPORT != "none"
 
 if IS_PRODUCTION and not EMAIL_ENABLED:
     # Signup refuses rather than leaking the code. Nothing else needs a
     # mailer, so the rest of the service stays up.
     logger.warning(
-        "No SMTP credentials, so signup is disabled. Login, meetings and "
-        "joining are unaffected. Set SMTP_USER and SMTP_PASS to re-enable it."
+        "No mail transport, so signup is disabled. Login, meetings and "
+        "joining are unaffected. Set RESEND_API_KEY to re-enable it."
+    )
+elif IS_PRODUCTION and EMAIL_TRANSPORT == "smtp":
+    # Worth saying at boot rather than at the first signup, because the
+    # failure is otherwise only visible in a log line nobody is watching.
+    logger.warning(
+        "Sending mail over SMTP. Hosts that block outbound SMTP will fail "
+        "every send with ENETUNREACH. Set RESEND_API_KEY to use HTTPS."
     )
 
 # --- WebRTC ICE -----------------------------------------------------------

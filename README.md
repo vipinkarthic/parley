@@ -117,7 +117,7 @@ second incognito window as a guest. Demo logins are opt in: set
 
 ```bash
 cd backend && pip install -r requirements-dev.txt
-pytest                                       # 191 tests, SQLite, offline
+pytest                                       # 197 tests, SQLite, offline
 TEST_DATABASE_URL=postgresql://... pytest    # same suite against Postgres
 
 cd e2e && npm ci && npx playwright install firefox

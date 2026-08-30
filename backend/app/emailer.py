@@ -1,12 +1,19 @@
-"""OTP email delivery via SMTP, with a dev fallback.
+"""OTP email delivery, over an HTTPS API or SMTP, with a dev fallback.
 
-When SMTP credentials are configured (SMTP_PASS set), the OTP is emailed from
-the configured Gmail account. Otherwise the code is logged to the server console
-so the app remains fully usable in development without email setup.
+Transport is chosen in config: the Resend API when `RESEND_API_KEY` is set,
+SMTP when Gmail credentials are, and otherwise a dev path that logs the code so
+the app stays usable with no mail setup at all.
+
+The API path exists because most PaaS hosts block outbound SMTP. Render refuses
+ports 25, 465 and 587, so smtplib fails with ENETUNREACH before it can
+authenticate and no App Password will help. Port 443 is open.
 """
+import json
 import logging
 import smtplib
 import ssl
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 from . import config
@@ -78,7 +85,45 @@ def send_existing_account_notice(to_email: str) -> bool:
     return True
 
 
-def _deliver(msg: EmailMessage) -> None:
+def _part(msg: EmailMessage, subtype: str) -> str | None:
+    """The body of one MIME subtype, or None when the message has no such part."""
+    part = msg.get_body(preferencelist=(subtype,))
+    return part.get_content() if part is not None else None
+
+
+def _deliver_via_resend(msg: EmailMessage) -> None:
+    """POST the message to Resend.
+
+    The sender is `EMAIL_FROM` rather than the address `_build_message` set,
+    because an API sender has to be one the account is allowed to send from and
+    that is unrelated to whichever mailbox SMTP would have used.
+    """
+    payload = {
+        "from": config.EMAIL_FROM,
+        "to": [msg["To"]],
+        "subject": msg["Subject"],
+    }
+    text = _part(msg, "plain")
+    html = _part(msg, "html")
+    if text:
+        payload["text"] = text
+    if html:
+        payload["html"] = html
+
+    request = urllib.request.Request(
+        config.RESEND_ENDPOINT,
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {config.RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=config.EMAIL_TIMEOUT):
+        pass
+
+
+def _deliver_via_smtp(msg: EmailMessage) -> None:
     context = ssl.create_default_context()
     with smtplib.SMTP(
         config.SMTP_HOST, config.SMTP_PORT, timeout=config.SMTP_TIMEOUT
@@ -86,6 +131,14 @@ def _deliver(msg: EmailMessage) -> None:
         server.starttls(context=context)
         server.login(config.SMTP_USER, config.SMTP_PASS)
         server.send_message(msg)
+
+
+def _deliver(msg: EmailMessage) -> None:
+    """Send by whichever transport is configured. Raises on failure."""
+    if config.EMAIL_TRANSPORT == "resend":
+        _deliver_via_resend(msg)
+    else:
+        _deliver_via_smtp(msg)
 
 
 def send_otp_email(to_email: str, code: str) -> bool:
@@ -103,25 +156,30 @@ def send_otp_email(to_email: str, code: str) -> bool:
         print(f"\n>>> [DEV OTP] {to_email} -> {code}\n", flush=True)
         return False
 
-    msg = _build_message(to_email, code)
-    context = ssl.create_default_context()
     try:
-        with smtplib.SMTP(
-            config.SMTP_HOST, config.SMTP_PORT, timeout=config.SMTP_TIMEOUT
-        ) as server:
-            server.starttls(context=context)
-            server.login(config.SMTP_USER, config.SMTP_PASS)
-            server.send_message(msg)
+        _deliver(_build_message(to_email, code))
     except smtplib.SMTPAuthenticationError as exc:
         logger.error("SMTP auth failed for %s: %s", config.SMTP_USER, exc)
         raise EmailSendError(
             "Email sign-in was rejected. Check the Gmail App Password."
         ) from exc
+    except urllib.error.HTTPError as exc:
+        # Resend puts the reason in the body, and it is the only thing that
+        # distinguishes a bad key from an unverified sender domain.
+        detail = exc.read().decode("utf-8", "replace")[:200]
+        logger.error(
+            "mail API rejected %s: %s %s", to_email, exc.code, detail
+        )
+        raise EmailSendError(
+            "We couldn't send the verification email. Please try again."
+        ) from exc
     except (OSError, smtplib.SMTPException) as exc:
-        logger.error("SMTP send to %s failed: %s", to_email, exc)
+        logger.error(
+            "%s send to %s failed: %s", config.EMAIL_TRANSPORT, to_email, exc
+        )
         raise EmailSendError(
             "We couldn't send the verification email. Please try again."
         ) from exc
 
-    logger.info("OTP email sent to %s", to_email)
+    logger.info("OTP email sent to %s via %s", to_email, config.EMAIL_TRANSPORT)
     return True
